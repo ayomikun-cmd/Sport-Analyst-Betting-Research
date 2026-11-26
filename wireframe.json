@@ -1,0 +1,242 @@
+{
+  "version": 4,
+  "app_title": "Sport Analyst Plan",
+  "nav": {
+    "placement": "none",
+    "items": []
+  },
+  "pages": [
+    {
+      "id": "page-8e843b3d",
+      "name": "Research Chat",
+      "route": "/",
+      "item_ref": {
+        "index": 1,
+        "text": "Build the signed-in AI research chat for football matches: head-to-head results, current form, squad availability, referee information, and bookings-market analysis, with source links, freshness indicators, and explicit gaps when evidence is unavailable."
+      },
+      "blocks": [
+        {
+          "id": "research-nav",
+          "type": "nav",
+          "label": "Sport Analyst navigation",
+          "hint": "Black and red branding; Research, Selections, Booking Codes, sign out",
+          "x": 0,
+          "y": 0,
+          "w": 12,
+          "h": 1,
+          "item_ref": {
+            "index": 1,
+            "text": "Build the signed-in AI research chat for football matches: head-to-head results, current form, squad availability, referee information, and bookings-market analysis, with source links, freshness indicators, and explicit gaps when evidence is unavailable."
+          },
+          "type_source": "palette"
+        },
+        {
+          "id": "research-history",
+          "type": "list",
+          "label": "Saved research chats",
+          "hint": "Previous conversations and new research action",
+          "x": 0,
+          "y": 1,
+          "w": 3,
+          "h": 7,
+          "item_ref": {
+            "index": 1,
+            "text": "Build the signed-in AI research chat for football matches: head-to-head results, current form, squad availability, referee information, and bookings-market analysis, with source links, freshness indicators, and explicit gaps when evidence is unavailable."
+          },
+          "type_source": "palette"
+        },
+        {
+          "id": "research-chat",
+          "type": "chat",
+          "label": "Match research conversation",
+          "hint": "Football analysis with sources, evidence freshness, missing information, and bookings-market findings",
+          "x": 3,
+          "y": 1,
+          "w": 9,
+          "h": 6,
+          "item_ref": {
+            "index": 1,
+            "text": "Build the signed-in AI research chat for football matches: head-to-head results, current form, squad availability, referee information, and bookings-market analysis, with source links, freshness indicators, and explicit gaps when evidence is unavailable."
+          },
+          "type_source": "palette"
+        },
+        {
+          "id": "research-composer",
+          "type": "form",
+          "label": "Ask Sport Analyst",
+          "hint": "Enter match and research question; submit to research assistant",
+          "x": 3,
+          "y": 7,
+          "w": 9,
+          "h": 2,
+          "item_ref": {
+            "index": 1,
+            "text": "Build the signed-in AI research chat for football matches: head-to-head results, current form, squad availability, referee information, and bookings-market analysis, with source links, freshness indicators, and explicit gaps when evidence is unavailable."
+          },
+          "type_source": "palette"
+        }
+      ],
+      "deleted_ids": []
+    },
+    {
+      "id": "page-d184e4c3",
+      "name": "Selections and Odds",
+      "route": "/selections",
+      "item_ref": {
+        "index": 2,
+        "text": "Build match selections and odds comparison across SportyBet, Bet9ja, and BetKing using verified data access, plus bankroll-based stake suggestions and potential-return calculations; never place bets or present picks as guaranteed."
+      },
+      "blocks": [
+        {
+          "id": "selections-nav",
+          "type": "nav",
+          "label": "Sport Analyst navigation",
+          "hint": "Research, Selections, Booking Codes, sign out",
+          "x": 0,
+          "y": 0,
+          "w": 12,
+          "h": 1,
+          "item_ref": {
+            "index": 2,
+            "text": "Build match selections and odds comparison across SportyBet, Bet9ja, and BetKing using verified data access, plus bankroll-based stake suggestions and potential-return calculations; never place bets or present picks as guaranteed."
+          },
+          "type_source": "palette"
+        },
+        {
+          "id": "selections-filters",
+          "type": "form",
+          "label": "Match and market filters",
+          "hint": "Choose researched match, market, and bookmakers",
+          "x": 0,
+          "y": 1,
+          "w": 12,
+          "h": 2,
+          "item_ref": {
+            "index": 2,
+            "text": "Build match selections and odds comparison across SportyBet, Bet9ja, and BetKing using verified data access, plus bankroll-based stake suggestions and potential-return calculations; never place bets or present picks as guaranteed."
+          },
+          "type_source": "palette"
+        },
+        {
+          "id": "selections-odds",
+          "type": "table",
+          "label": "Bookmaker odds comparison",
+          "hint": "SportyBet, Bet9ja, BetKing prices with timestamps and unavailable-data states",
+          "x": 0,
+          "y": 3,
+          "w": 8,
+          "h": 5,
+          "item_ref": {
+            "index": 2,
+            "text": "Build match selections and odds comparison across SportyBet, Bet9ja, and BetKing using verified data access, plus bankroll-based stake suggestions and potential-return calculations; never place bets or present picks as guaranteed."
+          },
+          "type_source": "palette"
+        },
+        {
+          "id": "selections-stake",
+          "type": "form",
+          "label": "Bankroll and stake suggestion",
+          "hint": "Enter bankroll; view suggested stake and potential returns without placing a bet",
+          "x": 8,
+          "y": 3,
+          "w": 4,
+          "h": 5,
+          "item_ref": {
+            "index": 2,
+            "text": "Build match selections and odds comparison across SportyBet, Bet9ja, and BetKing using verified data access, plus bankroll-based stake suggestions and potential-return calculations; never place bets or present picks as guaranteed."
+          },
+          "type_source": "palette"
+        },
+        {
+          "id": "selections-saved",
+          "type": "list",
+          "label": "Saved researched selections",
+          "hint": "Selected matches and markets with research rationale; send to booking-code tool",
+          "x": 0,
+          "y": 8,
+          "w": 12,
+          "h": 3,
+          "item_ref": {
+            "index": 2,
+            "text": "Build match selections and odds comparison across SportyBet, Bet9ja, and BetKing using verified data access, plus bankroll-based stake suggestions and potential-return calculations; never place bets or present picks as guaranteed."
+          },
+          "type_source": "palette"
+        }
+      ],
+      "deleted_ids": []
+    },
+    {
+      "id": "page-8f010908",
+      "name": "Booking Codes",
+      "route": "/booking-codes",
+      "item_ref": {
+        "index": 3,
+        "text": "Build booking-code conversion and code generation for researched selections through verified bookmaker integrations; clearly identify unsupported operations and provide a manual selection-transfer alternative rather than fabricate codes."
+      },
+      "blocks": [
+        {
+          "id": "codes-nav",
+          "type": "nav",
+          "label": "Sport Analyst navigation",
+          "hint": "Research, Selections, Booking Codes, sign out",
+          "x": 0,
+          "y": 0,
+          "w": 12,
+          "h": 1,
+          "item_ref": {
+            "index": 3,
+            "text": "Build booking-code conversion and code generation for researched selections through verified bookmaker integrations; clearly identify unsupported operations and provide a manual selection-transfer alternative rather than fabricate codes."
+          },
+          "type_source": "palette"
+        },
+        {
+          "id": "codes-convert",
+          "type": "form",
+          "label": "Convert booking code",
+          "hint": "Source bookmaker, existing code, target bookmaker; verified support only",
+          "x": 0,
+          "y": 1,
+          "w": 6,
+          "h": 4,
+          "item_ref": {
+            "index": 3,
+            "text": "Build booking-code conversion and code generation for researched selections through verified bookmaker integrations; clearly identify unsupported operations and provide a manual selection-transfer alternative rather than fabricate codes."
+          },
+          "type_source": "palette"
+        },
+        {
+          "id": "codes-generate",
+          "type": "form",
+          "label": "Generate booking code",
+          "hint": "Choose bookmaker and saved researched selections; verified support only",
+          "x": 6,
+          "y": 1,
+          "w": 6,
+          "h": 4,
+          "item_ref": {
+            "index": 3,
+            "text": "Build booking-code conversion and code generation for researched selections through verified bookmaker integrations; clearly identify unsupported operations and provide a manual selection-transfer alternative rather than fabricate codes."
+          },
+          "type_source": "palette"
+        },
+        {
+          "id": "codes-results",
+          "type": "list",
+          "label": "Code results and selection transfer",
+          "hint": "Valid returned codes when supported; otherwise explicit access limitations and copyable match-market selections for manual transfer",
+          "x": 0,
+          "y": 5,
+          "w": 12,
+          "h": 4,
+          "item_ref": {
+            "index": 3,
+            "text": "Build booking-code conversion and code generation for researched selections through verified bookmaker integrations; clearly identify unsupported operations and provide a manual selection-transfer alternative rather than fabricate codes."
+          },
+          "type_source": "palette"
+        }
+      ],
+      "deleted_ids": []
+    }
+  ],
+  "attached_to_plan": false
+}
