@@ -516,6 +516,18 @@ def research_workspace() -> rx.Component:
                     aria_busy=ResearchState.researching,
                     class_name="min-h-0 flex-1 overflow-y-auto overscroll-contain",
                 ),
+                rx.cond(
+                    ResearchState.active_chat != "",
+                    rx.el.div(
+                        rx.el.a(
+                            rx.icon("bookmark-plus", class_name="h-3.5 w-3.5"),
+                            "Review selections & odds with this research",
+                            href=f"/selections?chat={ResearchState.active_chat}",
+                            class_name="inline-flex items-center gap-2 rounded-lg px-2 py-2 text-xs text-zinc-300 hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-[#EF233C]",
+                        ),
+                        class_name="shrink-0 border-t border-white/10 px-4 md:px-8",
+                    ),
+                ),
                 composer(),
                 class_name="flex min-h-0 min-w-0 w-full flex-1 flex-col bg-[#09090B]",
             ),

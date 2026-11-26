@@ -5,6 +5,8 @@ from reflex.model import ModelRegistry
 from app.models import Base
 from app.components.research_workspace import research_workspace
 from app.states.research_state import ResearchState
+from app.states.selections_state import SelectionsState
+from app.pages.selections import selections_page
 
 ModelRegistry.register(Base)
 
@@ -33,4 +35,10 @@ app.add_page(
     route="/",
     title="Sport Analyst · Football Research",
     on_load=ResearchState.load,
+)
+app.add_page(
+    selections_page,
+    route="/selections",
+    title="Sport Analyst · Selections & Odds",
+    on_load=SelectionsState.load,
 )
