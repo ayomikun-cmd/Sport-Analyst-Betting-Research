@@ -806,30 +806,6 @@ table.log tr:last-child td { border-bottom: 0; }
 .missing-list { margin: 0; padding-left: 16px; display: grid; gap: 6px; font-size: 12.5px; color: var(--muted); }
 .missing-list li::marker { color: var(--warn); }
 
-.quote {
-  margin: 4px 0 14px;
-  padding: 12px 14px;
-  border-left: 2px solid var(--line);
-  background: var(--ink-2);
-  border-radius: 0 8px 8px 0;
-  font-size: 13.5px;
-  color: #d7d7de;
-}
-.claim-counts { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 12px; }
-.claims { display: grid; gap: 8px; }
-.claim {
-  border: 1px solid var(--line-soft);
-  border-left-width: 2px;
-  border-radius: 10px;
-  padding: 11px 13px;
-  background: var(--ink-2);
-}
-.claim.good { border-left-color: var(--good); }
-.claim.bad { border-left-color: var(--red-bright); }
-.claim.warn { border-left-color: var(--warn); }
-.claim-top { margin-bottom: 6px; }
-.claim-text { margin: 0; font-size: 13.5px; color: var(--text); }
-.claim-evidence { margin: 5px 0 0; font-size: 11.5px; color: var(--muted); font-family: var(--mono); }
 .tag.bad { color: var(--red-bright); border-color: rgba(227, 6, 19, 0.35); background: rgba(227, 6, 19, 0.08); }
 
 .slip-legs { display: grid; gap: 10px; margin-top: 14px; }

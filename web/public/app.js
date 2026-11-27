@@ -463,20 +463,7 @@ function renderReport(data) {
     </div>`;
 }
 
-/* ------------------------------------------------------- codes & claims */
-
-function shortDate(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value).slice(0, 16);
-  return date.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-}
-
-function claimClass(status) {
-  const value = String(status || '').toLowerCase();
-  if (value === 'supported') return 'good';
-  if (value === 'contradicted') return 'bad';
-  return 'warn';
-}
+/* ---------------------------------------------------------------- codes */
 
 async function runSlip(code) {
   const out = $('#slip-out');
@@ -494,80 +481,6 @@ async function runSlip(code) {
     out.className = 'panel empty-state';
     out.textContent = `Could not open that code: ${error.message}`;
   }
-}
-
-function renderScanPost(data) {
-  const out = $('#scan-out');
-  const claims = data.claims || [];
-  const tally = { supported: 0, contradicted: 0, 'cannot verify': 0 };
-  for (const claim of claims) {
-    const key = String(claim.status || '').toLowerCase();
-    if (key in tally) tally[key] += 1;
-  }
-
-  const body = data.aiError
-    ? `<p class="hint">Claim check unavailable: ${escapeHtml(data.aiError)}</p>`
-    : `
-      <div class="claim-counts">
-        <span class="tag good">${tally.supported} supported</span>
-        <span class="tag bad">${tally.contradicted} contradicted</span>
-        <span class="tag warn">${tally['cannot verify']} cannot verify</span>
-      </div>
-      <div class="claims">
-        ${claims.map((claim) => `<div class="claim ${claimClass(claim.status)}">
-          <div class="claim-top"><span class="tag ${claimClass(claim.status)}">${escapeHtml(claim.status)}</span></div>
-          <p class="claim-text">${escapeHtml(claim.claim)}</p>
-          <p class="claim-evidence">${escapeHtml(claim.evidence)}</p>
-        </div>`).join('') || '<p class="hint">No factual claims found in that post.</p>'}
-      </div>
-      ${data.summary ? `<p class="hint" style="margin-top:12px">${escapeHtml(data.summary)}</p>` : ''}`;
-
-  const checked = (data.context || []).map((row) => row.match).join(', ');
-
-  out.innerHTML = `
-    <div class="report-head">
-      <span class="tag src">X post</span>
-      <span class="tag">@${escapeHtml(data.post.author)}</span>
-      ${data.post.date ? `<span class="tag">${escapeHtml(shortDate(data.post.date))}</span>` : ''}
-    </div>
-    <blockquote class="quote">${escapeHtml(data.post.text)}</blockquote>
-    ${body}
-    <p class="hint" style="margin-top:12px">${checked ? `Checked against: ${escapeHtml(checked)}` : 'No fixture in the current feed matches this post, so nothing could be verified against live data.'}</p>
-    <p class="hint">Source: <a href="${escapeHtml(data.post.url)}" target="_blank" rel="noreferrer">the post</a> · every claim is compared only with form and head-to-head in the feed.</p>`;
-}
-
-function renderScanCode(data) {
-  const out = $('#scan-out');
-  if (!data.resolved) {
-    out.className = 'panel empty-state';
-    out.innerHTML = `<strong>${escapeHtml(data.code)}</strong><br />${escapeHtml(data.message || 'That code could not be read.')}`;
-    return;
-  }
-
-  const readFor = (selection) => (data.ai?.legs || []).find((row) => row.selection && selection && row.selection.toLowerCase().includes(String(selection).toLowerCase().slice(0, 12)));
-
-  out.innerHTML = `
-    <div class="report-head">
-      <span class="tag src">${escapeHtml(data.book)}</span>
-      <span class="tag">code ${escapeHtml(data.code.toUpperCase())}</span>
-      <span class="tag">${data.legs.length} legs</span>
-    </div>
-    <div class="verdict"><b>${price(data.combined)}</b><span>combined decimal odds</span></div>
-    <div class="legs">
-      ${data.legs.map((leg) => {
-        const read = readFor(leg.selection);
-        return `<div class="leg">
-          <span>${escapeHtml(leg.event || 'Event not named')}<br /><span class="hint">${escapeHtml(leg.market || 'Market not named')} · ${escapeHtml(leg.selection || 'Selection not named')}</span></span>
-          <span class="leg-price">${price(leg.odds)}</span>
-          <span class="tag">${leg.odds && leg.odds < 1.3 ? 'short' : 'priced'}</span>
-          ${read ? `<span class="leg-note">${escapeHtml(read.read)}</span>` : ''}
-        </div>`;
-      }).join('')}
-    </div>
-    ${data.aiError ? `<p class="hint">Slip read unavailable: ${escapeHtml(data.aiError)}</p>` : ''}
-    ${data.ai?.summary ? `<p class="hint" style="margin-top:10px">${escapeHtml(data.ai.summary)}</p>` : ''}
-    ${(data.ai?.risks || []).length ? `<div class="taglist risk" style="margin-top:10px">${data.ai.risks.map((r) => `<span class="tag warn">${escapeHtml(r)}</span>`).join('')}</div>` : ''}
-    <p class="hint" style="margin-top:10px">Resolved from ${escapeHtml(data.book)}'s own share endpoint. Odds are as returned; a code from another book has no open reader yet.</p>`;
 }
 
 function legVerdict(leg) {
