@@ -165,6 +165,7 @@ async function loadFeed(sport) {
       : '<div class="panel empty-state">No upcoming fixtures published for this league right now.</div>';
     updateHero(data);
     renderTicker();
+    renderHeroBoard(state.events);
   } catch (error) {
     $('#feed-meta').textContent = 'feed unavailable';
     board.innerHTML = `<div class="panel empty-state">Could not load prices: ${escapeHtml(error.message)}</div>`;
@@ -188,6 +189,25 @@ function updateHero(data) {
   $('#hero-stats').innerHTML = stats
     .map(([value, label], i) => `<div class="hero-stat"><b data-count="${i}">${escapeHtml(value)}</b><span>${label}</span></div>`)
     .join('');
+}
+
+function renderHeroBoard(events) {
+  const rows = $('#hb-rows');
+  if (!rows) return;
+  const top = (events || []).slice(0, 3);
+  if (!top.length) {
+    rows.innerHTML = '<p class="hint">No prices published right now.</p>';
+    return;
+  }
+  rows.innerHTML = top.map((event, index) => {
+    const market = event.market;
+    const home = market ? price(market.best.home?.price) : '—';
+    const away = market ? price(market.best.away?.price) : '—';
+    return `<div class="hb-row" style="--i:${index}">
+      <span class="hb-teams">${escapeHtml(event.home.name)}<em>v</em>${escapeHtml(event.away.name)}</span>
+      <span class="hb-odds"><b>${home}</b><b>${away}</b></span>
+    </div>`;
+  }).join('');
 }
 
 function renderTicker() {
@@ -301,6 +321,32 @@ function formHtml(context) {
     </div>`;
 }
 
+function cornersHtml(context) {
+  const corners = context?.corners;
+  if (!corners || (corners.home.average === null && corners.away.average === null)) {
+    return '<div class="ctx wide"><h4>Corners per game</h4><p class="hint">No corner counts in the match summaries for these sides yet.</p></div>';
+  }
+  const home = corners.home;
+  const away = corners.away;
+  const h2h = corners.h2h || {};
+  const max = Math.max(home.average || 0, away.average || 0, 1);
+  const bar = (team, data, tone) => `<div class="corner-row">
+    <span class="corner-team">${escapeHtml(team)}</span>
+    <span class="corner-bar"><i class="${tone}" style="width:${data.average === null ? 0 : Math.max(4, (data.average / max) * 100)}%"></i></span>
+    <b>${data.average === null ? '—' : data.average.toFixed(1)}</b>
+    <span class="hint">${data.matches || 0} games</span>
+  </div>`;
+
+  return `<div class="ctx wide">
+    <h4>Corners per game</h4>
+    ${bar(context.form.home.team, home, 'home')}
+    ${bar(context.form.away.team, away, 'away')}
+    <p class="hint" style="margin-top:10px">${h2h.matches
+      ? `Head-to-head: ${h2h.averageTotal.toFixed(1)} corners per meeting (${h2h.averageHome.toFixed(1)} home, ${h2h.averageAway.toFixed(1)} away) across ${h2h.matches} match${h2h.matches > 1 ? 'es' : ''}.`
+      : 'Head-to-head: no completed meeting with corner data.'}</p>
+  </div>`;
+}
+
 function renderReport(data) {
   const { event, ai, aiError, context, sources, notes } = data;
   const market = event.market;
@@ -346,6 +392,7 @@ function renderReport(data) {
       <div class="ctx-grid">
         <div class="ctx"><h4>Market</h4>${priceRows}</div>
         ${formHtml(context)}
+        ${cornersHtml(context)}
       </div>
 
       ${aiHtml}

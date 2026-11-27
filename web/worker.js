@@ -496,6 +496,31 @@ async function espnTeamList(key) {
   return teams;
 }
 
+async function cornersForEvent(key, eventId) {
+  const league = LEAGUES[key];
+  if (!league || league.sport !== 'soccer' || !eventId) return null;
+  const cacheKey = `corners:${eventId}`;
+  const cached = memoGet(cacheKey);
+  if (cached) return cached;
+  const res = await fetch(`${ESPN_BASE}/soccer/${league.espn}/summary?event=${eventId}`, {
+    headers: { accept: 'application/json' },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  const teams = data?.boxscore?.teams || [];
+  if (!teams.length) return null;
+  const read = (side) => {
+    const row = teams.find((team) => team.homeAway === side);
+    const stat = (row?.statistics || []).find((entry) => /corner/i.test(entry.name || ''));
+    const value = stat ? Number(stat.displayValue ?? stat.value) : null;
+    return Number.isFinite(value) ? value : null;
+  };
+  const result = { home: read('home'), away: read('away') };
+  memoSet(cacheKey, result, 30 * 60 * 1000);
+  return result;
+}
+
 async function espnSchedule(key, teamId, season) {
   const league = LEAGUES[key];
   if (!league || league.sport !== 'soccer' || !teamId) return null;
@@ -514,17 +539,19 @@ async function espnSchedule(key, teamId, season) {
 
 function recentResults(schedule, teamId) {
   return (schedule?.events || [])
-    .map((event) => event.competitions?.[0])
-    .filter((comp) => comp?.status?.type?.completed)
-    .map((comp) => {
+    .map((event) => ({ event, comp: event.competitions?.[0] }))
+    .filter(({ comp }) => comp?.status?.type?.completed)
+    .map(({ event, comp }) => {
       const own = (comp.competitors || []).find((c) => String(c.team?.id) === String(teamId));
       const opp = (comp.competitors || []).find((c) => String(c.team?.id) !== String(teamId));
       if (!own || !opp) return null;
       return {
+        id: event.id || comp.id || comp.uid || null,
         date: (comp.date || '').slice(0, 10),
         opponent: opp.team?.displayName || 'Opponent',
         score: `${scoreValue(own.score)}-${scoreValue(opp.score)}`,
         result: own.winner ? 'W' : opp.winner ? 'L' : 'D',
+        side: own.homeAway || 'home',
       };
     })
     .filter(Boolean)
@@ -562,9 +589,10 @@ async function fetchMatchContext(event) {
   const seenMeetings = new Set();
   const meetings = [homeSchedule, homeLastSeason]
     .flatMap((feed) => feed?.events || [])
-    .map((row) => row.competitions?.[0])
-    .filter((comp) => comp?.status?.type?.completed && (comp.competitors || []).some((c) => String(c.team?.id) === String(away.team.id)))
-    .map((comp) => ({
+    .map((row) => ({ row, comp: row.competitions?.[0] }))
+    .filter(({ comp }) => comp?.status?.type?.completed && (comp.competitors || []).some((c) => String(c.team?.id) === String(away.team.id)))
+    .map(({ row, comp }) => ({
+      id: row.id || comp.id || null,
       date: (comp.date || '').slice(0, 10),
       line: (comp.competitors || []).map((c) => `${c.team?.abbreviation || ''} ${scoreValue(c.score)}`).join(' — '),
     }))
@@ -578,6 +606,52 @@ async function fetchMatchContext(event) {
 
   if (!homeResults.length && !awayResults.length && !meetings.length) return null;
 
+  const ids = [...new Set([
+    ...meetings.map((row) => row.id),
+    ...homeResults.map((row) => row.id),
+    ...awayResults.map((row) => row.id),
+  ].filter(Boolean))].slice(0, 14);
+
+  const cornerRows = new Map();
+  await Promise.all(ids.map(async (id) => {
+    const row = await cornersForEvent(event.league, id).catch(() => null);
+    if (row && (row.home !== null || row.away !== null)) cornerRows.set(id, row);
+  }));
+
+  const average = (values) => (values.length
+    ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1))
+    : null);
+
+  const teamCorners = (results) => {
+    const values = results
+      .map((row) => {
+        const corners = cornerRows.get(row.id);
+        if (!corners) return null;
+        return row.side === 'away' ? corners.away : corners.home;
+      })
+      .filter((value) => Number.isFinite(value));
+    return { average: average(values), matches: values.length, values };
+  };
+
+  const h2hCorners = (() => {
+    const totals = [];
+    const homeValues = [];
+    const awayValues = [];
+    for (const meeting of meetings) {
+      const corners = cornerRows.get(meeting.id);
+      if (!corners || !Number.isFinite(corners.home) || !Number.isFinite(corners.away)) continue;
+      totals.push(corners.home + corners.away);
+      homeValues.push(corners.home);
+      awayValues.push(corners.away);
+    }
+    return {
+      matches: totals.length,
+      averageTotal: average(totals),
+      averageHome: average(homeValues),
+      averageAway: average(awayValues),
+    };
+  })();
+
   return {
     teams: { home: home.team.displayName, away: away.team.displayName },
     form: {
@@ -585,6 +659,11 @@ async function fetchMatchContext(event) {
       away: { team: away.team.displayName, sequence: awayResults.map((r) => r.result).join(''), results: awayResults },
     },
     h2h: { meetings },
+    corners: {
+      home: teamCorners(homeResults),
+      away: teamCorners(awayResults),
+      h2h: h2hCorners,
+    },
     missing: [
       'Referee appointment and card average (not published by these feeds before kick-off)',
       'Confirmed line-ups and late fitness news',
