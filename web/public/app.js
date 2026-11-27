@@ -578,6 +578,7 @@ function legVerdict(leg) {
 }
 
 function renderSlip(data) {
+  state.lastSlip = data;
   const out = $('#slip-out');
   if (!data.resolved) {
     out.className = 'panel empty-state';
@@ -924,6 +925,55 @@ function bind() {
     state.day = event.target.value;
     $$('#day-tabs .day-tab').forEach((row) => row.classList.remove('active'));
     renderFeed();
+  });
+
+  $('#split-run').addEventListener('click', () => {
+    const data = state.lastSlip;
+    const out = $('#trim-out');
+    if (!data || !data.resolved) return toast('Open a code first');
+    const groups = {};
+    for (const leg of data.legs) {
+      const key = leg.kickoff ? new Date(leg.kickoff).toISOString().slice(0, 13) : 'unknown';
+      (groups[key] = groups[key] || []).push(leg);
+    }
+    const keys = Object.keys(groups).sort();
+    out.className = 'panel';
+    out.hidden = false;
+    out.innerHTML = `<p class="label" style="margin:0 0 10px">Split by kickoff</p>` + keys.map((key) => {
+      const legs = groups[key];
+      const odds = legs.reduce((total, leg) => total * (leg.odds || 1), 1);
+      const when = key === 'unknown'
+        ? 'Kickoff unknown'
+        : new Date(`${key}:00:00Z`).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+      return `<div class="split-group">
+        <div class="split-head"><b>${escapeHtml(when)}</b><span>${legs.length} legs · ${price(odds)}</span></div>
+        <ul class="res-list">${legs.map((leg) => `<li><span>${escapeHtml(leg.event || '')} · ${escapeHtml(leg.selection || '')}</span><b>${price(leg.odds)}</b></li>`).join('')}</ul>
+      </div>`;
+    }).join('');
+  });
+
+  $('#build-run').addEventListener('click', async () => {
+    const target = Number($('#build-target').value);
+    if (!(target > 1)) return toast('Give a target price above 1.00');
+    const out = $('#build-out');
+    out.hidden = false;
+    out.className = 'panel';
+    out.innerHTML = '<div class="skeleton" style="height:140px"></div>';
+    try {
+      const data = await api('/api/build', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ target, day: state.day }),
+      });
+      out.innerHTML = `
+        <div class="report-head"><span class="tag src">research build</span><span class="tag">${escapeHtml(data.day)}</span><span class="tag good">${data.picks.length} picks</span><span class="tag">${data.considered} fixtures considered</span></div>
+        <div class="verdict"><b>${price(data.combined)}</b><span>combined price · target ${data.target}</span></div>
+        <div class="legs">${data.picks.map((pick) => `<div class="leg"><span>${escapeHtml(pick.event)}<br /><span class="hint">${escapeHtml(pick.league)} · ${escapeHtml(pick.pick)}</span></span><span class="leg-price">${price(pick.price)}</span><span class="tag">${pick.fair}%</span></div>`).join('')}</div>
+        <p class="hint" style="margin-top:10px">${escapeHtml(data.note)}</p>`;
+    } catch (error) {
+      out.className = 'panel empty-state';
+      out.textContent = `Build failed: ${error.message}`;
+    }
   });
 
   $('#trim-run').addEventListener('click', async () => {

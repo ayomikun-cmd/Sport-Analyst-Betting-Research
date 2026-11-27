@@ -6,6 +6,7 @@
 <title>Sport Analyst — football research, not tips</title>
 <meta name="description" content="Football-first market research for Nigerian books: SportyBet prices, de-vigged fair probability, current form and head-to-head, with an analyst that cannot invent a number." />
 <meta name="theme-color" content="#08080a" />
+<link rel="icon" href="/img/logo.svg" type="image/svg+xml" />
 <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -14,7 +15,7 @@
 
 <header class="topbar">
   <div class="wrap topbar-inner">
-    <a class="brand" href="#feed"><span class="brand-mark">/</span>SPORT<span>ANALYST</span></a>
+    <a class="brand" href="#feed"><img class="brand-logo" src="/img/logo.svg" alt="Sport Analyst" />SPORT<span>ANALYST</span></a>
     <nav class="nav" id="nav">
       <a href="#feed" class="active">Feed</a>
       <a href="#research">Research</a>
@@ -68,6 +69,12 @@
       </div>
     </div>
     <p class="feed-meta" id="feed-meta">loading fixtures…</p>
+    <div class="build-row">
+      <span class="build-label">Build a slip</span>
+      <input class="input" id="build-target" type="number" min="1.2" step="1" placeholder="Target odds · e.g. 10" />
+      <button class="btn btn-ghost" id="build-run" type="button">Research &amp; pick</button>
+    </div>
+    <div id="build-out" class="panel empty-state" hidden></div>
     <div class="board" id="board">
       <div class="skeleton" style="height:200px"></div>
       <div class="skeleton" style="height:200px"></div>
@@ -104,6 +111,7 @@
       <div class="trim-row">
         <input class="input" id="trim-target" type="number" min="1.2" step="1" placeholder="Trim to odds · e.g. 100" />
         <button class="btn btn-ghost" id="trim-run" type="button">Trim slip</button>
+        <button class="btn btn-ghost" id="split-run" type="button">Split by kickoff</button>
       </div>
       <div id="trim-out" class="panel empty-state">Set a target price and trim: the safest legs are kept until the target is met, and the legs not worth playing are listed.</div>
       <div id="slip-out" class="panel empty-state" style="margin-top:14px">

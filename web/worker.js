@@ -1126,10 +1126,10 @@ async function handleSlip(request, env) {
   )).flatMap((row) => row.events || []);
 
   const analysed = [];
-  for (const leg of legs.slice(0, 10)) {
+  for (const leg of legs.slice(0, 30)) {
     analysed.push(await enrichLeg(pool, leg));
   }
-  const rest = legs.slice(10).map((leg) => ({
+  const rest = legs.slice(30).map((leg) => ({
     ...leg,
     flags: [],
     analysed: false,
@@ -1320,6 +1320,87 @@ async function handleOdds(url, env) {
   } catch (error) {
     return json({ error: 'Could not load odds feed', detail: String(error.message || error) }, 502);
   }
+}
+
+async function handleBuild(request, env) {
+  if (!sameOrigin(request)) return json({ error: 'Cross-origin request rejected' }, 403);
+  let body;
+  try {
+    body = await readBody(request);
+  } catch (error) {
+    return json({ error: String(error.message || 'Invalid body') }, 400);
+  }
+
+  const target = Number(body.target);
+  const day = String(body.day || '').slice(0, 10);
+  if (!(target >= 1.2 && target <= 5000)) {
+    return json({ error: 'Give a target price between 1.20 and 5,000' }, 400);
+  }
+
+  const packs = await Promise.all(FOOTBALL_LEAGUES.map(async (key) => {
+    try {
+      const { events } = await loadEvents(env, key);
+      return events
+        .filter((event) => !event.completed && event.market && event.start)
+        .map((event) => ({ ...event, leagueLabel: LEAGUES[key].label, league: key }));
+    } catch {
+      return [];
+    }
+  }));
+
+  const pool = packs.flat().filter((event) => {
+    if (!day) return true;
+    return new Date(event.start).toISOString().slice(0, 10) === day;
+  });
+  if (!pool.length) return json({ error: 'No priced fixtures on that day across the tracked leagues' }, 404);
+
+  const candidates = [];
+  for (const event of pool) {
+    const sides = event.hasDraw ? ['home', 'draw', 'away'] : ['home', 'away'];
+    let bestSide = null;
+    for (const side of sides) {
+      const fair = event.market.consensus[side];
+      if (!Number.isFinite(fair)) continue;
+      if (!bestSide || fair > bestSide.fair) {
+        bestSide = {
+          side,
+          fair,
+          name: side === 'home' ? event.home.name : side === 'draw' ? 'Draw' : event.away.name,
+          price: event.market.best[side]?.price ?? null,
+        };
+      }
+    }
+    if (!bestSide || !bestSide.price || bestSide.fair < 0.4) continue;
+    candidates.push({
+      event: event.name,
+      eventId: event.id,
+      league: event.leagueLabel,
+      kickoff: event.start,
+      pick: bestSide.name,
+      side: bestSide.side,
+      price: bestSide.price,
+      fair: Number((bestSide.fair * 100).toFixed(1)),
+      lineShop: event.market.lineShop,
+    });
+  }
+
+  candidates.sort((a, b) => b.fair - a.fair);
+  const picked = [];
+  let combined = 1;
+  for (const row of candidates) {
+    if (combined >= target) break;
+    picked.push(row);
+    combined *= row.price;
+  }
+
+  return json({
+    target,
+    day: day || new Date().toISOString().slice(0, 10),
+    combined: Number(combined.toFixed(2)),
+    picks: picked,
+    considered: candidates.length,
+    note: 'Picks are the highest de-vigged probability outcome per fixture, taken safest-first until the target price is met. Single-book prices mean no positive edge; this is a research shortlist, not a guarantee.',
+  });
 }
 
 async function handleTrim(request, env) {
@@ -1578,6 +1659,7 @@ async function route(request, env) {
   if (pathname === '/api/ask' && request.method === 'POST') return handleAsk(request, env);
   if (pathname === '/api/slip' && request.method === 'POST') return handleSlip(request, env);
   if (pathname === '/api/trim' && request.method === 'POST') return handleTrim(request, env);
+  if (pathname === '/api/build' && request.method === 'POST') return handleBuild(request, env);
 
   if (pathname.startsWith('/api/')) return json({ error: 'Not found' }, 404);
 

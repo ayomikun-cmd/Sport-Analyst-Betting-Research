@@ -296,6 +296,18 @@ html { scroll-behavior: smooth; }
 .chip:hover { color: var(--text); border-color: var(--muted-2); }
 .chip.active { background: var(--red); border-color: var(--red); color: #fff; }
 .chip.more { border-style: dashed; }
+.brand-logo { width: 26px; height: 26px; border-radius: 7px; display: block; }
+.brand { align-items: center; }
+
+.build-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 18px; }
+.build-label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.build-row .input { max-width: 230px; }
+
+.split-group { padding: 10px 0; border-top: 1px solid var(--line-soft); }
+.split-group:first-of-type { border-top: 0; }
+.split-head { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; margin-bottom: 6px; }
+.split-head span { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
 .chip-wrap { display: inline-flex; align-items: center; }
 .chip-star {
   background: none;
