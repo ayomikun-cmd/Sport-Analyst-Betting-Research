@@ -21,8 +21,8 @@ bookmaker price exists. The report says which research inputs are missing
 | Match form | ESPN team feeds: last five results and W/D/L sequence per side |
 | Head-to-head | This season plus last season's completed meetings |
 | Ask desk | Plain-English Q&A grounded in the same worker-computed numbers |
-| Post checker | Paste an X post; the worker pulls its text and marks each factual claim supported, contradicted or cannot verify against form and head-to-head |
-| Booking code reader | SportyBet codes resolve to their legs and combined price via the book's own share endpoint; other books are named as unsupported rather than guessed |
+| Booking code reader | Paste a code; the worker detects the book, resolves every leg with its market, pick and price, then checks each pick against live price, form, head-to-head and corners, naming what works against it |
+| Avoid list | Legs the data argues against are flagged avoid, and the slip reader names the strongest option left |
 | Arbitrage flag | `Σ(1/best price) < 1` |
 | Slip audit | Combined odds + per-leg edge against the live feed, with a trim suggestion |
 | Book converter | Same slip at equivalent decimal odds for Bet9ja/BetKing/GokaBet/1xBet (no booking code) |
@@ -35,17 +35,21 @@ League, Europa League, plus NBA, NFL, MLB and NHL as secondary sports.
 Platforms listed in the UI: SportyBet (priced), Bet9ja, BetKing, GokaBet, 1xBet
 (conversion targets only).
 
-## Codes and claims
+## Booking codes
 
-Paste a link like `https://x.com/<user>/status/<id>` into **Codes & claims**. The
-worker reads the post through X's syndication endpoint (with public mirrors as
-fallbacks), matches it to a fixture in the feed, and asks the model to grade each
-factual claim against form and head-to-head only. Anything the feed cannot cover
-comes back as `cannot verify`, never as a guess.
+Paste a code such as `MAG1NM` into **Slip code**. The worker asks SportyBet's
+own slip endpoint (`/api/ng/orders/share/<code>`) and detects the book from the
+answer. Each leg comes back with its fixture, market, pick and price.
 
-Paste a booking code and the worker asks SportyBet's share endpoint for the legs.
-A code from Bet9ja, BetKing or GokaBet has no open reader, so the UI says so and
-points at the slip audit instead of inventing a slip.
+The reader then enriches the legs with live 1X2 prices, de-vigged fair
+probability, last-five form, head-to-head and corners per game, flags anything
+working against a pick (form, meetings, price shorter than fair, exotic market
+with no model), marks legs `aligned`, `caution` or `avoid`, and names the
+strongest remaining option. Slips longer than ten legs are only researched in
+part, and the UI says how many legs were left unchecked.
+
+Bet9ja, BetKing and GokaBet have no public code reader, so a code they own
+cannot be opened; the UI says so instead of inventing a slip.
 
 ## Run locally
 

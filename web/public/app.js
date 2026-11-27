@@ -419,24 +419,21 @@ function claimClass(status) {
   return 'warn';
 }
 
-async function runScan(input) {
-  const out = $('#scan-out');
+async function runSlip(code) {
+  const out = $('#slip-out');
   out.className = 'panel';
-  out.innerHTML = '<div class="skeleton" style="height:170px"></div>';
+  out.innerHTML = '<div class="skeleton" style="height:190px"></div>';
 
   try {
-    const data = await api('/api/scan', {
+    const data = await api('/api/slip', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ input, sport: state.sport }),
+      body: JSON.stringify({ code, sport: state.sport }),
     });
-    if (data.kind === 'post') return renderScanPost(data);
-    if (data.kind === 'code') return renderScanCode(data);
-    out.className = 'panel empty-state';
-    out.textContent = data.error || 'Nothing to check.';
+    renderSlip(data);
   } catch (error) {
     out.className = 'panel empty-state';
-    out.textContent = `Check failed: ${error.message}`;
+    out.textContent = `Could not open that code: ${error.message}`;
   }
 }
 
@@ -512,6 +509,59 @@ function renderScanCode(data) {
     ${data.ai?.summary ? `<p class="hint" style="margin-top:10px">${escapeHtml(data.ai.summary)}</p>` : ''}
     ${(data.ai?.risks || []).length ? `<div class="taglist risk" style="margin-top:10px">${data.ai.risks.map((r) => `<span class="tag warn">${escapeHtml(r)}</span>`).join('')}</div>` : ''}
     <p class="hint" style="margin-top:10px">Resolved from ${escapeHtml(data.book)}'s own share endpoint. Odds are as returned; a code from another book has no open reader yet.</p>`;
+}
+
+function legVerdict(leg) {
+  if ((leg.flags || []).some((flag) => flag.level === 'avoid')) return { cls: 'bad', label: 'avoid' };
+  if ((leg.flags || []).length) return { cls: 'warn', label: 'caution' };
+  if (!leg.analysed) return { cls: '', label: 'unmatched' };
+  return { cls: 'good', label: 'aligned' };
+}
+
+function renderSlip(data) {
+  const out = $('#slip-out');
+  if (!data.resolved) {
+    out.className = 'panel empty-state';
+    out.innerHTML = `<strong>${escapeHtml(data.code || '')}</strong><br />${escapeHtml(data.message || 'That code could not be read.')}`;
+    return;
+  }
+
+  const avoid = [...new Set([...(data.avoid || []), ...((data.ai && data.ai.avoid) || [])])].slice(0, 12);
+  const analysed = data.legs.filter((leg) => leg.analysed).length;
+
+  out.innerHTML = `
+    <div class="report-head">
+      <span class="tag src">${escapeHtml(data.book)}</span>
+      <span class="tag">${escapeHtml(data.code)}</span>
+      <span class="tag">${data.legs.length} legs</span>
+      <span class="tag">${analysed} matched in feed</span>
+    </div>
+    <div class="verdict"><b>${price(data.combined)}</b><span>combined decimal odds · book detected from the code</span></div>
+    ${avoid.length ? `<div class="warn-line"><b>Avoid for safety.</b><span>${avoid.map((name) => escapeHtml(name)).join(' · ')}</span></div>` : ''}
+    ${data.best ? `<div class="ctx" style="margin-top:12px"><h4>Strongest option on this slip</h4>
+      <p style="margin:0;font-size:13.5px"><strong>${escapeHtml(data.best.name)}</strong> in ${escapeHtml(data.best.event || 'the fixture')} at ${price(data.best.price)} · fair ${pct(data.best.fair)}.</p></div>` : ''}
+    <div class="slip-legs">
+      ${data.legs.map((leg) => {
+        const verdict = legVerdict(leg);
+        return `<div class="slip-leg ${verdict.cls}">
+          <div class="slip-leg-top">
+            <span class="slip-event">${escapeHtml(leg.event || 'Event')}${leg.kickoff ? `<em>${escapeHtml(kickoff(leg.kickoff))}</em>` : ''}</span>
+            <span class="tag ${verdict.cls}">${verdict.label}</span>
+            <b class="leg-price">${price(leg.odds)}</b>
+          </div>
+          <p class="slip-pick">${escapeHtml(leg.market || 'Market')} · <strong>${escapeHtml(leg.selection || 'pick')}</strong></p>
+          ${(leg.flags || []).length ? `<ul class="slip-flags">${leg.flags.map((flag) => `<li class="${flag.level}">${escapeHtml(flag.text)}</li>`).join('')}</ul>` : leg.analysed ? '<p class="hint">Nothing in the feed works against this pick.</p>' : '<p class="hint">Not researched in depth.</p>'}
+          ${leg.alternative ? `<p class="hint">Market leans <strong>${escapeHtml(leg.alternative.name)}</strong> at ${price(leg.alternative.price)} (fair ${pct(leg.alternative.fair)}).</p>` : ''}
+        </div>`;
+      }).join('')}
+    </div>
+    ${data.ai ? `<div class="ctx" style="margin-top:14px"><h4>The read</h4>
+      <p style="margin:0;font-size:13.5px">${escapeHtml(data.ai.summary || '')}</p>
+      ${(data.ai.avoid || []).length ? `<p class="hint" style="margin-top:8px">Cut: ${data.ai.avoid.map((name) => escapeHtml(name)).join(', ')}</p>` : ''}
+      ${data.ai.bestOption ? `<p class="hint">Safer pick: <strong>${escapeHtml(data.ai.bestOption.pick || '')}</strong> in ${escapeHtml(data.ai.bestOption.event || '')} — ${escapeHtml(data.ai.bestOption.why || '')}</p>` : ''}
+    </div>` : ''}
+    ${data.aiError ? `<p class="hint">Slip read unavailable: ${escapeHtml(data.aiError)}</p>` : ''}
+    <p class="hint" style="margin-top:10px">Read from ${escapeHtml(data.book)}'s own slip endpoint; prices are as the book returned them. ${data.legs.length - analysed} leg(s) were not researched in depth.</p>`;
 }
 
 /* ------------------------------------------------------------------ ask */
@@ -812,18 +862,18 @@ function bind() {
     analyse(query ? { sport: state.sport, query } : { sport: state.sport });
   });
 
-  $('#scan-form').addEventListener('submit', (event) => {
+  $('#slip-form').addEventListener('submit', (event) => {
     event.preventDefault();
-    const input = $('#scan-input').value.trim();
-    if (!input) return toast('Paste a booking code or a post link');
-    runScan(input);
+    const code = $('#slip-input').value.trim();
+    if (!code) return toast('Paste a booking code first');
+    runSlip(code);
   });
 
-  $('#scan-suggest').addEventListener('click', (event) => {
-    const chip = event.target.closest('[data-scan]');
+  $('#slip-suggest').addEventListener('click', (event) => {
+    const chip = event.target.closest('[data-slip]');
     if (!chip) return;
-    $('#scan-input').value = chip.dataset.scan;
-    runScan(chip.dataset.scan);
+    $('#slip-input').value = chip.dataset.slip;
+    runSlip(chip.dataset.slip);
   });
 
   $('#ask-form').addEventListener('submit', (event) => {

@@ -18,7 +18,7 @@
     <nav class="nav" id="nav">
       <a href="#feed" class="active">Feed</a>
       <a href="#research">Research</a>
-      <a href="#scan">Codes</a>
+      <a href="#scan">Slip code</a>
       <a href="#ask">Ask</a>
       <a href="#lab">Slip</a>
       <a href="#record">Record</a>
@@ -83,21 +83,21 @@
 
   <section id="scan" class="section reveal">
     <div class="section-head">
-      <h2>Codes &amp; claims</h2>
-      <p class="hint">Paste a booking code or an X post. Resolve it, then check it.</p>
+      <h2>Booking code reader</h2>
+      <p class="hint">Paste any Nigerian code. We find the book, open every leg, and say what is against each pick.</p>
     </div>
     <div class="scan">
-      <form class="ask-form" id="scan-form">
-        <input class="input" id="scan-input" placeholder="4K9TZQ  ·  or  https://x.com/…/status/…" autocomplete="off" />
-        <button class="btn btn-red" type="submit">Check</button>
+      <form class="ask-form" id="slip-form">
+        <input class="input" id="slip-input" placeholder="MAG1NM" autocomplete="off" spellcheck="false" />
+        <button class="btn btn-red" type="submit">Open slip</button>
       </form>
-      <div class="row" id="scan-suggest" style="margin-top:10px">
-        <button class="chip" data-scan="https://x.com/Adikastakes/status/2126223851378082237">Try a tipster post</button>
-        <button class="chip" data-scan="https://x.com/Adikastakes/status/2126211875037659185">Try the Forest claim</button>
+      <div class="row" id="slip-suggest" style="margin-top:10px">
+        <button class="chip" data-slip="MAG1NM">Try MAG1NM</button>
+        <span class="hint" style="align-self:center">SportyBet, Bet9ja, BetKing and GokaBet codes accepted.</span>
       </div>
-      <div id="scan-out" class="panel empty-state" style="margin-top:14px">
-        A code is opened into its legs and read game by game. A post is split into claims and marked
-        supported, contradicted or cannot verify against live form and head-to-head.
+      <div id="slip-out" class="panel empty-state" style="margin-top:14px">
+        The book is detected from the code, the legs are read from its own slip endpoint, and each pick is
+        checked against live price, form, head-to-head and corners. Anything working against a pick is named.
       </div>
     </div>
   </section>

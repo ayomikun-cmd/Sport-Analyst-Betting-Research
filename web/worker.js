@@ -9,7 +9,7 @@
  *   GET  /api/odds?sport=epl         upcoming events + real bookmaker prices
  *   POST /api/research               grounded event research (+ optional AI narrative)
  *   POST /api/convert                slip translation / combined-odds rebuild
- *   POST /api/scan                   resolve a booking code, or fact-check an X post
+ *   POST /api/slip                   resolve a booking code into legs, with per-leg research
  *   *                                static assets from ./public
  *
  * Design rule: every number returned to the client is computed here from a
@@ -881,34 +881,19 @@ async function handleAsk(request, env) {
 
 /* ------------------------------------------------------- posts and codes */
 
-const X_URL = /^https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})\/status\/(\d{5,25})/i;
 const CODE_SHAPE = /^[A-Za-z0-9-]{4,24}$/;
 
-const VERIFY_SYSTEM = `You are Sport Analyst checking a tipster's football post against live data.
+const CODE_SYSTEM = `You are Sport Analyst reading a resolved betting slip for a Nigerian punter.
 
-DATA contains match rows with prices, de-vigged fair probability, current form (last five, most recent first) and head-to-head meetings. It is the only evidence you may use.
+You receive legs exactly as the bookmaker returned them, each with any live enrichment the worker could attach: current 1X2 prices, de-vigged fair probability, last-five form, head-to-head meetings and corners.
 Rules:
-- Split the post into short factual claims (form, head-to-head, league position, streaks, manager records).
-- For each claim give status:
-  "supported" when DATA shows it,
-  "contradicted" when DATA shows the opposite,
-  "cannot verify" when DATA does not cover it. Never guess, and never use outside knowledge.
-- evidence must cite the DATA field and the exact numbers or result you compared (for example "headToHead 2026-05-04 CHE 1 — NFO 3").
-- A claim about a match with no DATA row is "cannot verify".
-- Opinions, predictions and stakes advice are not factual claims: skip them, and mention in summary if the post is mostly opinion.
-- Never invent a referee, injury, lineup or statistic.
+- Name the number of legs and the combined price. Quote only numbers in DATA.
+- For each leg say what has to happen, then name anything that does NOT favour that pick, with the reason (form line, head-to-head result, price shorter than fair, exotic market with no model).
+- Mark each leg "aligned", "caution" or "avoid". Be willing to say avoid.
+- Then give one safer option: the outcome in the strongest leg with the best de-vigged probability, and what to cut.
+- Never invent a referee, injury, lineup or statistic. If DATA has no form for a leg, say it is unverified rather than guessing.
 Reply with ONE JSON object and nothing else:
-{"summary":"max 45 words","claims":[{"claim":"...","status":"supported|contradicted|cannot verify","evidence":"..."}],"confidence":0-100}`;
-
-const CODE_SYSTEM = `You are Sport Analyst reading a resolved betting slip.
-You receive the legs exactly as the bookmaker returned them, with prices. Analyse the games, not the payout.
-Rules:
-- Name the book, the number of legs and the combined price. Quote only the numbers given.
-- For each leg, say in one line what the pick needs to happen, and whether the listed price looks short or fair relative to nothing more than what you are given. If you have no independent probability, say "no independent read".
-- Flag correlated legs (same match), short prices under 1.30, and anything that cannot be read.
-- Never invent form, injuries or team news that the payload does not contain.
-Reply with ONE JSON object and nothing else:
-{"summary":"max 60 words","legs":[{"selection":"...","read":"one line"}],"risks":["short strings"]}`;
+{"summary":"max 60 words","legs":[{"event":"...","selection":"...","verdict":"aligned|caution|avoid","reason":"one line"}],"avoid":["event names to drop"],"bestOption":{"event":"...","pick":"...","why":"one line"}}`;
 
 function readAiJson(text) {
   const raw = String(text || '');
@@ -916,97 +901,6 @@ function readAiJson(text) {
   const end = raw.lastIndexOf('}');
   if (start < 0 || end <= start) throw new Error('AI did not return JSON');
   return JSON.parse(raw.slice(start, end + 1));
-}
-
-async function fetchPost(url) {
-  const match = String(url).match(X_URL);
-  if (!match) return null;
-  const [, handle, id] = match;
-
-  const attempts = [
-    {
-      name: 'syndication',
-      url: `https://cdn.syndication.twimg.com/tweet-result?id=${id}&lang=en&token=a`,
-      pick: (data) => ({ author: data.user?.screen_name, text: data.text, date: data.created_at }),
-    },
-    {
-      name: 'fxtwitter',
-      url: `https://api.fxtwitter.com/${handle}/status/${id}`,
-      pick: (data) => ({ author: data.tweet?.author?.screen_name, text: data.tweet?.text, date: data.tweet?.created_at }),
-    },
-    {
-      name: 'vxtwitter',
-      url: `https://api.vxtwitter.com/${handle}/status/${id}`,
-      pick: (data) => ({ author: data.user_screen_name, text: data.text, date: data.date }),
-    },
-  ];
-
-  let lastError = 'no source answered';
-  for (const attempt of attempts) {
-    try {
-      const res = await fetch(attempt.url, {
-        headers: {
-          accept: 'application/json',
-          'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-        },
-        signal: AbortSignal.timeout(12_000),
-      });
-      if (!res.ok) {
-        lastError = `${attempt.name} ${res.status}`;
-        continue;
-      }
-      const data = await res.json().catch(() => null);
-      const picked = data ? attempt.pick(data) : null;
-      const text = String(picked?.text || '').trim();
-      if (!text) {
-        lastError = `${attempt.name} returned no text`;
-        continue;
-      }
-      return {
-        author: picked.author || handle,
-        text: text.slice(0, 1200),
-        date: picked.date || null,
-        url: `https://x.com/${handle}/status/${id}`,
-      };
-    } catch (error) {
-      lastError = `${attempt.name} ${String(error.message || 'failed').slice(0, 60)}`;
-    }
-  }
-  throw new Error(`Post lookup failed: ${lastError}`);
-}
-
-function fixtureMentions(events, text) {
-  const hay = ` ${String(text || '').toLowerCase()} `;
-  return events.filter((event) => {
-    const names = [...nameKeys(event.home.name), ...nameKeys(event.away.name)];
-    return names.filter((token) => hay.includes(token)).length >= 2;
-  });
-}
-
-async function contextForText(env, sport, text) {
-  const { events } = await loadEvents(env, sport);
-  const hits = fixtureMentions(events, text).slice(0, 2);
-  const rows = [];
-  for (const event of hits) {
-    const context = await fetchMatchContext(event).catch(() => null);
-    rows.push({
-      match: event.name,
-      league: event.leagueLabel,
-      kickoff: event.start,
-      prices: event.market
-        ? {
-            home: event.market.best.home?.price ?? null,
-            draw: event.market.best.draw?.price ?? null,
-            away: event.market.best.away?.price ?? null,
-          }
-        : null,
-      lineShop: event.market ? event.market.lineShop : false,
-      form: context ? context.form : null,
-      headToHead: context ? context.h2h : null,
-      gaps: context ? context.missing : null,
-    });
-  }
-  return rows;
 }
 
 async function resolveSportyCode(code) {
@@ -1021,27 +915,173 @@ async function resolveSportyCode(code) {
   const payload = await res.json().catch(() => null);
   if (!payload) return { ok: false, message: `SportyBet returned ${res.status}` };
   const data = payload.data || {};
-  const list = Array.isArray(data.outcomes) ? data.outcomes : Array.isArray(data.bets) ? data.bets : [];
-  if (!list.length) {
+  const events = Array.isArray(data.outcomes) ? data.outcomes : [];
+  const selections = data.ticket?.selections || data.ticket?.bets || [];
+  if (!selections.length && !events.length) {
     return { ok: false, message: payload.message || payload.innerMsg || 'That code has no readable selections' };
   }
-  const legs = list.map((row) => {
-    const eventName = row.eventName
-      || row.event?.name
-      || [row.event?.homeTeamName, row.event?.awayTeamName].filter(Boolean).join(' v ');
+
+  const legs = (selections.length ? selections : events).map((selection) => {
+    const event = events.find((row) => row.eventId === (selection.eventId || selection.id)) || null;
+    const market = event && selection.marketId
+      ? (event.markets || []).find((row) => String(row.id) === String(selection.marketId))
+      : null;
+    const outcome = market && selection.outcomeId
+      ? (market.outcomes || []).find((row) => String(row.id) === String(selection.outcomeId))
+      : null;
     return {
-      event: eventName || null,
-      market: row.marketDesc || row.market?.desc || row.marketName || null,
-      selection: row.outcomeDesc || row.outcome?.desc || row.selection || null,
-      odds: Number(row.odds ?? row.price) || null,
+      eventId: event?.eventId || selection.eventId || null,
+      event: event ? `${event.homeTeamName} v ${event.awayTeamName}` : null,
+      home: event?.homeTeamName || null,
+      away: event?.awayTeamName || null,
+      league: event?.sport?.category?.tournament?.name || null,
+      kickoff: event?.estimateStartTime ? new Date(Number(event.estimateStartTime)).toISOString() : null,
+      market: market?.desc || null,
+      selection: outcome?.desc || null,
+      odds: Number(outcome?.odds ?? selection.odds) || null,
+      marketProbability: outcome?.probability ? Number(outcome.probability) : null,
     };
-  }).filter((leg) => leg.selection || leg.event);
+  }).filter((leg) => leg.event || leg.selection);
+
   if (!legs.length) return { ok: false, message: 'That code resolved without readable selections' };
   const combined = legs.reduce((total, leg) => total * (leg.odds || 1), 1);
-  return { ok: true, legs, combined: Number(combined.toFixed(4)) };
+  return {
+    ok: true,
+    legs,
+    combined: Number(combined.toFixed(4)),
+    stake: data.ticket?.totalStake ?? null,
+    potential: data.ticket?.potentialWinnings ?? null,
+  };
 }
 
-async function handleScan(request, env) {
+function pickSide(leg, event) {
+  if (!event) return null;
+  const pick = String(leg.selection || '').toLowerCase();
+  const home = nameKeys(event.home.name);
+  const away = nameKeys(event.away.name);
+  if (home.some((token) => pick.includes(token))) return 'home';
+  if (away.some((token) => pick.includes(token))) return 'away';
+  if (/^draw$|^x$|draw/i.test(leg.selection || '')) return 'draw';
+  return null;
+}
+
+async function enrichLeg(events, leg) {
+  const implied = leg.odds ? 1 / leg.odds : null;
+  const base = { ...leg, implied, flags: [], alternative: null, analysed: false };
+  if (!leg.home || !leg.away) return { ...base, read: 'No fixture detail was returned for this leg.' };
+
+  if (!implied) {
+    base.flags.push({ level: 'caution', text: 'No price was returned for this pick.' });
+  } else if (implied < 0.4) {
+    base.flags.push({ level: 'avoid', text: `The book makes this a ${(implied * 100).toFixed(0)}% shot at ${leg.odds.toFixed(2)}; a long shot inside a multi.` });
+  } else if (implied < 0.6) {
+    base.flags.push({ level: 'caution', text: `Book implies ${(implied * 100).toFixed(0)}% at ${leg.odds.toFixed(2)} — closer to a coin flip than it looks.` });
+  } else if (leg.odds < 1.25) {
+    base.flags.push({ level: 'caution', text: `Very short at ${leg.odds.toFixed(2)}: one miss wipes the whole slip.` });
+  }
+
+  const event = events.find((row) => leg.eventId && String(row.id).endsWith(String(leg.eventId).split(':').pop()))
+    || events.find((row) => teamScore(row.home.name, leg.home) >= 2 && teamScore(row.away.name, leg.away) >= 2)
+    || null;
+
+  if (!event) {
+    return { ...base, read: 'Fixture is outside the leagues this app prices, so only the book price is known.' };
+  }
+
+  const context = await fetchMatchContext(event).catch(() => null);
+  const side = pickSide(leg, event);
+  const flags = [];
+
+  if (!side) {
+    flags.push({
+      level: 'caution',
+      text: `"${leg.selection || 'This pick'}" is not a 1X2 selection, so there is no de-vigged probability to test it against — only the book's own price.`,
+    });
+  }
+
+  if (side && side !== 'draw') {
+    const form = context?.form?.[side];
+    if (form?.results?.length) {
+      const losses = form.results.filter((row) => row.result === 'L').length;
+      const wins = form.results.filter((row) => row.result === 'W').length;
+      if (losses >= 4) flags.push({ level: 'avoid', text: `${form.team} lost ${losses} of the last ${form.results.length} (${form.sequence}).` });
+      else if (losses >= 3) flags.push({ level: 'caution', text: `${form.team} lost ${losses} of the last ${form.results.length} (${form.sequence}).` });
+      if (wins === 0) flags.push({ level: 'caution', text: `${form.team} have not won in their last ${form.results.length}.` });
+    }
+  }
+
+  const meetings = context?.h2h?.meetings || [];
+  if (side && side !== 'draw' && meetings.length) {
+    const abbr = side === 'home' ? event.home : event.away;
+    const lost = meetings.filter((row) => {
+      const parts = String(row.line).split(' — ');
+      const own = parts.find((part) => part.includes((abbr.name || '').slice(0, 3).toUpperCase()));
+      if (!own) return false;
+      const scores = own.match(/(\d+)\s*$/);
+      const other = parts.find((part) => part !== own);
+      const otherScore = other ? String(other).match(/(\d+)\s*$/) : null;
+      return scores && otherScore && Number(scores[1]) < Number(otherScore[1]);
+    }).length;
+    if (lost >= 2) flags.push({ level: 'caution', text: `Lost ${lost} of the last ${meetings.length} meetings between these sides.` });
+  }
+
+  let alternative = null;
+  if (event.market && side) {
+    const fair = event.market.consensus[side];
+    if (Number.isFinite(fair) && leg.odds) {
+      const edge = leg.odds * fair - 1;
+      if (edge < -0.08) {
+        flags.push({ level: 'caution', text: `${leg.odds.toFixed(2)} is short of the fair ${(1 / fair).toFixed(2)} (${(edge * 100).toFixed(1)}% at that price).` });
+      }
+    }
+    const sides = event.hasDraw ? ['home', 'draw', 'away'] : ['home', 'away'];
+    const best = sides.slice().sort((a, b) => event.market.consensus[b] - event.market.consensus[a])[0];
+    if (best && best !== side) {
+      alternative = {
+        side: best,
+        name: best === 'home' ? event.home.name : best === 'draw' ? 'Draw' : event.away.name,
+        price: event.market.best[best]?.price ?? null,
+        fair: event.market.consensus[best],
+      };
+    }
+  }
+
+  if (!event.market) flags.push({ level: 'caution', text: 'No price in the feed for this fixture, so the base cannot be checked.' });
+
+  return {
+    ...base,
+    analysed: true,
+    side,
+    matchedEvent: event.name,
+    form: context?.form || null,
+    meetings: meetings.slice(0, 3),
+    corners: context?.corners || null,
+    flags,
+    alternative,
+    read: flags.length ? flags[0].text : 'Nothing in the feed contradicts this pick.',
+  };
+}
+
+function legPayload(leg) {
+  return {
+    event: leg.event,
+    league: leg.league,
+    market: leg.market,
+    selection: leg.selection,
+    odds: leg.odds,
+    matchedEvent: leg.matchedEvent || null,
+    form: leg.form ? {
+      home: { team: leg.form.home.team, sequence: leg.form.home.sequence },
+      away: { team: leg.form.away.team, sequence: leg.form.away.sequence },
+    } : null,
+    headToHead: leg.meetings || null,
+    corners: leg.corners ? { home: leg.corners.home.average, away: leg.corners.away.average } : null,
+    flags: leg.flags.map((flag) => flag.text),
+    alternative: leg.alternative,
+  };
+}
+
+async function handleSlip(request, env) {
   if (!sameOrigin(request)) return json({ error: 'Cross-origin request rejected' }, 403);
   let body;
   try {
@@ -1050,78 +1090,92 @@ async function handleScan(request, env) {
     return json({ error: String(error.message || 'Invalid body') }, 400);
   }
 
-  const input = String(body.input || '').trim().slice(0, 500);
-  if (!input) return json({ error: 'Paste a post link or a booking code' }, 400);
+  const code = String(body.code || body.input || '').replace(/\s+/g, '').toUpperCase().slice(0, 24);
+  if (!code) return json({ error: 'Paste a booking code' }, 400);
+  if (!CODE_SHAPE.test(code)) return json({ error: 'That does not look like a booking code' }, 400);
   const sport = body.sport && LEAGUES[body.sport] ? body.sport : 'epl';
-
-  if (X_URL.test(input)) {
-    let post;
-    try {
-      post = await fetchPost(input);
-    } catch (error) {
-      return json({ error: String(error.message || 'Could not read that post') }, 502);
-    }
-    const context = await contextForText(env, sport, post.text).catch(() => []);
-    if (!env.OPENAI_API_KEY) {
-      return json({ kind: 'post', post, context, claims: null, aiError: 'OPENAI_API_KEY is not configured' });
-    }
-    try {
-      const parsed = readAiJson(await aiCall(
-        env,
-        VERIFY_SYSTEM,
-        `POST by @${post.author}${post.date ? ` on ${post.date}` : ''}:\n${post.text}\n\nDATA:\n${JSON.stringify(context, null, 2)}`,
-      ));
-      return json({
-        kind: 'post',
-        post,
-        context,
-        summary: parsed.summary || null,
-        claims: Array.isArray(parsed.claims) ? parsed.claims.slice(0, 12) : [],
-        confidence: Number.isFinite(parsed.confidence) ? parsed.confidence : null,
-        aiError: null,
-      });
-    } catch (error) {
-      return json({ kind: 'post', post, context, claims: null, aiError: String(error.message || error).slice(0, 200) }, 502);
-    }
-  }
-
-  const code = input.replace(/\s+/g, '');
-  if (!CODE_SHAPE.test(code)) {
-    return json({ error: 'That is neither an X post link nor a booking code' }, 400);
-  }
 
   let resolved;
   try {
     resolved = await resolveSportyCode(code);
   } catch (error) {
-    return json({ kind: 'code', code, resolved: false, message: String(error.message || 'Code lookup failed').slice(0, 200) }, 502);
+    return json({ kind: 'slip', code, resolved: false, message: String(error.message || 'Code lookup failed').slice(0, 200) }, 502);
   }
 
   if (!resolved.ok) {
     return json({
-      kind: 'code',
+      kind: 'slip',
       code,
       resolved: false,
-      message: `SportyBet could not resolve ${code.toUpperCase()}: ${String(resolved.message || 'no selections returned').replace(/\.$/, '')}. Codes from Bet9ja, BetKing and GokaBet have no open reader, so paste the slip text into the audit instead.`,
+      book: null,
+      message: `No open Nigerian reader returned ${code}: SportyBet said "${String(resolved.message || 'no selections').replace(/\.$/, '')}". Bet9ja, BetKing and GokaBet codes have no public reader, so paste the slip text into the audit instead.`,
     });
   }
+
+  const legs = resolved.legs.slice(0, 40);
+  const pool = (await Promise.all(
+    FOOTBALL_LEAGUES.map((key) => loadEvents(env, key).catch(() => ({ events: [] }))),
+  )).flatMap((row) => row.events || []);
+
+  const analysed = [];
+  for (const leg of legs.slice(0, 10)) {
+    analysed.push(await enrichLeg(pool, leg));
+  }
+  const rest = legs.slice(10).map((leg) => ({
+    ...leg,
+    flags: [],
+    analysed: false,
+    read: 'Not analysed in depth — the slip has more legs than one pass can research.',
+  }));
+  const all = [...analysed, ...rest];
+
+  const candidates = analysed
+    .filter((leg) => leg.alternative && Number.isFinite(leg.alternative.fair))
+    .sort((a, b) => b.alternative.fair - a.alternative.fair)
+    .slice(0, 3)
+    .map((leg) => ({ event: leg.matchedEvent, name: leg.alternative.name, price: leg.alternative.price, fair: leg.alternative.fair }));
 
   let ai = null;
   let aiError = null;
   if (env.OPENAI_API_KEY) {
     try {
-      const parsed = readAiJson(await aiCall(
+      ai = readAiJson(await aiCall(
         env,
         CODE_SYSTEM,
-        JSON.stringify({ book: 'SportyBet', code, combined: resolved.combined, legs: resolved.legs }, null, 2),
+        JSON.stringify({
+          book: 'SportyBet',
+          code,
+          legs: legs.length,
+          combined: resolved.combined,
+          analysed: analysed.map(legPayload),
+          notAnalysedCount: rest.length,
+          strongestAlternatives: candidates,
+        }, null, 2),
       ));
-      ai = parsed;
     } catch (error) {
       aiError = String(error.message || error).slice(0, 200);
     }
   }
 
-  return json({ kind: 'code', code, book: 'SportyBet', resolved: true, legs: resolved.legs, combined: resolved.combined, ai, aiError });
+  const avoid = analysed.filter((leg) => leg.flags.some((flag) => flag.level === 'avoid')).map((leg) => leg.event);
+  const caution = analysed.filter((leg) => leg.flags.some((flag) => flag.level === 'caution')).map((leg) => leg.event);
+
+  return json({
+    kind: 'slip',
+    code,
+    book: 'SportyBet',
+    resolved: true,
+    combined: resolved.combined,
+    stake: resolved.stake,
+    potential: resolved.potential,
+    legs: all,
+    analysedCount: analysed.length,
+    avoid,
+    caution,
+    best: candidates[0] || null,
+    ai,
+    aiError,
+  });
 }
 
 /* --------------------------------------------------------------- helpers */
@@ -1364,7 +1418,7 @@ async function route(request, env) {
   if (pathname === '/api/research' && request.method === 'POST') return handleResearch(request, env);
   if (pathname === '/api/convert' && request.method === 'POST') return handleConvert(request);
   if (pathname === '/api/ask' && request.method === 'POST') return handleAsk(request, env);
-  if (pathname === '/api/scan' && request.method === 'POST') return handleScan(request, env);
+  if (pathname === '/api/slip' && request.method === 'POST') return handleSlip(request, env);
 
   if (pathname.startsWith('/api/')) return json({ error: 'Not found' }, 404);
 
