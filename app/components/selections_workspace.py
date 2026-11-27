@@ -875,6 +875,11 @@ def saved_item(selection: SelectionView) -> rx.Component:
                 disabled=~selection["eligible"] | SelectionsState.saving,
                 class_name=BUTTON,
             ),
+            rx.el.a(
+                "Manual transfer",
+                href=f"/booking-codes?selection={selection['id']}",
+                class_name=BUTTON,
+            ),
             rx.el.button(
                 "Edit",
                 on_click=SelectionsState.edit_selection(selection["id"]),

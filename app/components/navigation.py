@@ -45,11 +45,17 @@ def navigation(active: str = "research") -> rx.Component:
                     "border-b-2 border-transparent px-3 py-4 text-sm text-zinc-400 hover:text-[#F4F4F5] focus-visible:outline-2 focus-visible:outline-[#EF233C]",
                 ),
             ),
-            rx.el.button(
+            rx.el.a(
                 "Booking Codes",
-                disabled=True,
-                title="Available in a later phase",
-                class_name="cursor-not-allowed px-3 py-4 text-sm text-zinc-400",
+                href="/booking-codes",
+                aria_current=rx.cond(
+                    active == "booking-codes", "page", "false"
+                ),
+                class_name=rx.cond(
+                    active == "booking-codes",
+                    "border-b-2 border-[#EF233C] px-3 py-4 text-sm font-medium text-[#F4F4F5] focus-visible:outline-2 focus-visible:outline-[#EF233C]",
+                    "border-b-2 border-transparent px-3 py-4 text-sm text-zinc-400 hover:text-[#F4F4F5] focus-visible:outline-2 focus-visible:outline-[#EF233C]",
+                ),
             ),
             aria_label="Main navigation",
             class_name="col-span-2 row-start-2 flex items-center justify-center gap-1 md:col-span-1 md:col-start-2 md:row-start-1 md:gap-5",

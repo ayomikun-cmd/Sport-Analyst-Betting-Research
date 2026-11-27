@@ -7,6 +7,8 @@ from app.components.research_workspace import research_workspace
 from app.states.research_state import ResearchState
 from app.states.selections_state import SelectionsState
 from app.pages.selections import selections_page
+from app.pages.booking_codes import booking_codes_page
+from app.states.booking_codes_state import BookingCodesState
 
 ModelRegistry.register(Base)
 
@@ -41,4 +43,10 @@ app.add_page(
     route="/selections",
     title="Sport Analyst · Selections & Odds",
     on_load=SelectionsState.load,
+)
+app.add_page(
+    booking_codes_page,
+    route="/booking-codes",
+    title="Sport Analyst · Booking Codes",
+    on_load=BookingCodesState.load,
 )

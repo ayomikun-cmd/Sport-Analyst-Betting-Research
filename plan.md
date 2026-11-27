@@ -1,5 +1,5 @@
 ## Sport Analyst Plan
 - [x] Set up a database for signed-in users’ research chats and saved selections, using a black-and-charcoal interface, red accents, high-contrast white text, and clean Inter typography throughout Sport Analyst.
 - [x] Build the signed-in AI research chat for football matches: head-to-head results, current form, squad availability, referee information, and bookings-market analysis, with source links, freshness indicators, and explicit gaps when evidence is unavailable.
-- [ ] Build match selections and odds comparison across SportyBet, Bet9ja, and BetKing using verified data access, plus bankroll-based stake suggestions and potential-return calculations; never place bets or present picks as guaranteed.
+- [x] Build match selections and odds comparison across SportyBet, Bet9ja, and BetKing using verified data access, plus bankroll-based stake suggestions and potential-return calculations; never place bets or present picks as guaranteed.
 - [ ] Build booking-code conversion and code generation for researched selections through verified bookmaker integrations; clearly identify unsupported operations and provide a manual selection-transfer alternative rather than fabricate codes.
