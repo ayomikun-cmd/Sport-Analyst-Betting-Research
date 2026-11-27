@@ -359,6 +359,12 @@ function renderReport(data) {
 
 /* ------------------------------------------------------- codes & claims */
 
+function shortDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 16);
+  return date.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
 function claimClass(status) {
   const value = String(status || '').toLowerCase();
   if (value === 'supported') return 'good';
@@ -419,7 +425,7 @@ function renderScanPost(data) {
     <div class="report-head">
       <span class="tag src">X post</span>
       <span class="tag">@${escapeHtml(data.post.author)}</span>
-      ${data.post.date ? `<span class="tag">${escapeHtml(data.post.date)}</span>` : ''}
+      ${data.post.date ? `<span class="tag">${escapeHtml(shortDate(data.post.date))}</span>` : ''}
     </div>
     <blockquote class="quote">${escapeHtml(data.post.text)}</blockquote>
     ${body}
