@@ -1,0 +1,17 @@
+{
+  "name": "sport-analyst",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Football-first market research: SportyBet prices, de-vigged probabilities, form and head-to-head context, grounded LLM narration.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "set-key": "node scripts/set-key.mjs",
+    "check-ai": "node scripts/check-ai.mjs",
+    "check": "node --check worker.js && node --check public/app.js"
+  },
+  "devDependencies": {
+    "wrangler": "^4.42.0"
+  }
+}
