@@ -488,6 +488,13 @@ function scoreValue(node) {
   return String(node);
 }
 
+function numericScore(node) {
+  if (node === null || node === undefined) return null;
+  const raw = typeof node === 'object' ? node.value ?? node.displayValue : node;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
 async function espnTeamList(key) {
   const league = LEAGUES[key];
   if (!league || league.sport !== 'soccer') return null;
@@ -599,11 +606,20 @@ async function fetchMatchContext(event) {
     .flatMap((feed) => feed?.events || [])
     .map((row) => ({ row, comp: row.competitions?.[0] }))
     .filter(({ comp }) => comp?.status?.type?.completed && (comp.competitors || []).some((c) => String(c.team?.id) === String(away.team.id)))
-    .map(({ row, comp }) => ({
-      id: row.id || comp.id || null,
-      date: (comp.date || '').slice(0, 10),
-      line: (comp.competitors || []).map((c) => `${c.team?.abbreviation || ''} ${scoreValue(c.score)}`).join(' — '),
-    }))
+    .map(({ row, comp }) => {
+      const competitors = comp.competitors || [];
+      const homeSide = competitors.find((c) => c.homeAway === 'home') || competitors[0];
+      const awaySide = competitors.find((c) => c.homeAway === 'away') || competitors[1];
+      return {
+        id: row.id || comp.id || null,
+        date: (comp.date || '').slice(0, 10),
+        homeId: homeSide?.team?.id ?? null,
+        awayId: awaySide?.team?.id ?? null,
+        homeScore: numericScore(homeSide?.score),
+        awayScore: numericScore(awaySide?.score),
+        line: competitors.map((c) => `${c.team?.abbreviation || ''} ${scoreValue(c.score)}`).join(' — '),
+      };
+    })
     .filter((row) => {
       if (!row.date || seenMeetings.has(row.date)) return false;
       seenMeetings.add(row.date);
@@ -662,6 +678,7 @@ async function fetchMatchContext(event) {
 
   return {
     teams: { home: home.team.displayName, away: away.team.displayName },
+    ids: { home: home.team.id, away: away.team.id },
     form: {
       home: { team: home.team.displayName, sequence: homeResults.map((r) => r.result).join(''), results: homeResults },
       away: { team: away.team.displayName, sequence: awayResults.map((r) => r.result).join(''), results: awayResults },
@@ -1038,16 +1055,15 @@ async function enrichLeg(events, leg) {
   }
 
   const meetings = context?.h2h?.meetings || [];
-  if (side && side !== 'draw' && meetings.length) {
-    const abbr = side === 'home' ? event.home : event.away;
+  const ownId = context?.ids?.[side];
+  if (side && side !== 'draw' && meetings.length && ownId !== undefined && ownId !== null) {
     const lost = meetings.filter((row) => {
-      const parts = String(row.line).split(' — ');
-      const own = parts.find((part) => part.includes((abbr.name || '').slice(0, 3).toUpperCase()));
-      if (!own) return false;
-      const scores = own.match(/(\d+)\s*$/);
-      const other = parts.find((part) => part !== own);
-      const otherScore = other ? String(other).match(/(\d+)\s*$/) : null;
-      return scores && otherScore && Number(scores[1]) < Number(otherScore[1]);
+      const atHome = String(row.homeId) === String(ownId);
+      const atAway = String(row.awayId) === String(ownId);
+      if (!atHome && !atAway) return false;
+      const own = atHome ? row.homeScore : row.awayScore;
+      const other = atHome ? row.awayScore : row.homeScore;
+      return Number.isFinite(own) && Number.isFinite(other) && own < other;
     }).length;
     if (lost >= 2) flags.push({ level: 'caution', text: `Lost ${lost} of the last ${meetings.length} meetings between these sides.` });
   }
