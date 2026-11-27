@@ -523,7 +523,7 @@ function renderSlip(data) {
             <b class="leg-price">${price(leg.odds)}</b>
           </div>
           <p class="slip-pick">${escapeHtml(leg.market || 'Market')} · <strong>${escapeHtml(leg.selection || 'pick')}</strong></p>
-          ${(leg.flags || []).length ? `<ul class="slip-flags">${leg.flags.map((flag) => `<li class="${flag.level}">${escapeHtml(flag.text)}</li>`).join('')}</ul>` : leg.analysed ? '<p class="hint">Nothing in the feed works against this pick.</p>' : '<p class="hint">Not researched in depth.</p>'}
+          ${(leg.flags || []).length ? `<ul class="slip-flags">${leg.flags.map((flag) => `<li class="${flag.level}">${escapeHtml(flag.text)}</li>`).join('')}</ul>` : leg.analysed ? `<p class="hint">${escapeHtml(leg.read || 'Nothing in the feed works against this pick.')}</p>` : '<p class="hint">Not researched in depth.</p>'}
           ${leg.alternative ? `<p class="hint">Market leans <strong>${escapeHtml(leg.alternative.name)}</strong> at ${price(leg.alternative.price)} (fair ${pct(leg.alternative.fair)}).</p>` : ''}
         </div>`;
       }).join('')}

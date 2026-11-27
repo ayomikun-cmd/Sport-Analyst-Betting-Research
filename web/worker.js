@@ -1009,6 +1009,181 @@ function pickSide(leg, event) {
   return null;
 }
 
+/* Market models: totals, both-teams-to-score, handicaps, double chance and
+ * win-to-nil are all derivable from the goals in the form feed. Anything that
+ * needs a half-time split or a streak sequence is named as unmodelled instead
+ * of being waved away as "not 1X2". */
+
+function poissonP(k, lambda) {
+  let fact = 1;
+  for (let i = 2; i <= k; i += 1) fact *= i;
+  return (Math.exp(-lambda) * Math.pow(lambda, k)) / fact;
+}
+
+function scoreMatrix(homeLambda, awayLambda) {
+  const limit = 10;
+  const rows = [];
+  let total = 0;
+  for (let h = 0; h <= limit; h += 1) {
+    for (let a = 0; a <= limit; a += 1) {
+      const p = poissonP(h, homeLambda) * poissonP(a, awayLambda);
+      rows.push({ h, a, p });
+      total += p;
+    }
+  }
+  return rows.map((row) => ({ ...row, p: row.p / (total || 1) }));
+}
+
+function goalProfile(form) {
+  const rows = (form?.results || []).map((row) => {
+    const [gf, ga] = String(row.score || '').split('-').map(Number);
+    return Number.isFinite(gf) && Number.isFinite(ga) ? { gf, ga } : null;
+  }).filter(Boolean);
+  if (rows.length < 3) return null;
+  const mean = (key) => rows.reduce((sum, row) => sum + row[key], 0) / rows.length;
+  return { scored: mean('gf'), conceded: mean('ga'), matches: rows.length };
+}
+
+function expectedGoals(context) {
+  const home = goalProfile(context?.form?.home);
+  const away = goalProfile(context?.form?.away);
+  if (!home || !away) return null;
+  const clamp = (value) => Math.min(4, Math.max(0.25, value));
+  return {
+    home: clamp((home.scored + away.conceded) / 2),
+    away: clamp((away.scored + home.conceded) / 2),
+    matches: Math.min(home.matches, away.matches),
+  };
+}
+
+function lineNumber(text) {
+  const match = String(text).match(/-?\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : null;
+}
+
+function overProbability(rows, line, side) {
+  let over = 0;
+  for (const row of rows) {
+    const value = side === 'home' ? row.h : side === 'away' ? row.a : row.h + row.a;
+    if (value > line) over += row.p;
+    else if (value === line) over += row.p / 2;
+  }
+  return over;
+}
+
+function teamFromText(text, event) {
+  const lower = String(text || '').toLowerCase();
+  if (!event) return null;
+  if (nameKeys(event.home.name).some((token) => lower.includes(token))) return 'home';
+  if (nameKeys(event.away.name).some((token) => lower.includes(token))) return 'away';
+  return null;
+}
+
+function marketModel(leg, event, context, consensus) {
+  const market = String(leg.market || '').toLowerCase();
+  const pick = String(leg.selection || '').toLowerCase();
+  if (!market) return { reason: 'the book did not name this market' };
+
+  if (/half|1up|excluded|in a row|correct score|multi-?goal|player|corner|card|booking/.test(market)) {
+    const why = /half/.test(market)
+      ? 'it needs a half-time split, which these feeds do not publish'
+      : /in a row/.test(market)
+        ? 'it needs the order goals were scored in, not just the final score'
+        : /excluded/.test(market)
+          ? 'it excludes specific scorelines, which the goals model cannot price'
+          : /1up/.test(market)
+            ? 'it is a promotion market with a refund rule the feed cannot price'
+            : 'the form feed has no data for that market type';
+    return { reason: why };
+  }
+
+  const expected = expectedGoals(context);
+  if (!expected) return { reason: 'neither side has three scored matches in the feed to build a goals model' };
+  const rows = scoreMatrix(expected.home, expected.away);
+  const p1 = consensus?.home ?? 0;
+  const px = consensus?.draw ?? 0;
+  const p2 = consensus?.away ?? 0;
+
+  if (/draw no bet/.test(market)) {
+    if (!/home|away/.test(pick)) return { reason: 'the draw-no-bet side was not readable' };
+    const chosen = pick.includes('home') ? p1 : p2;
+    const total = p1 + p2;
+    if (!total) return { reason: 'there is no 1X2 price to build draw-no-bet from' };
+    return { label: 'Draw no bet', probability: chosen / total };
+  }
+
+  if (/double chance/.test(market)) {
+    const hasHome = pick.includes('home');
+    const hasAway = pick.includes('away');
+    const hasDraw = pick.includes('draw');
+    if (!consensus) return { reason: 'there is no 1X2 price to build double chance from' };
+    const probability = hasHome && hasDraw ? p1 + px : hasAway && hasDraw ? p2 + px : hasHome && hasAway ? p1 + p2 : null;
+    if (probability === null) return { reason: 'the double-chance side was not readable' };
+    return { label: 'Double chance', probability };
+  }
+
+  if (/win to nil/.test(market)) {
+    const side = teamFromText(market, event) || (pick.includes('home') ? 'home' : pick.includes('away') ? 'away' : null);
+    if (!side) return { reason: 'the team in the win-to-nil market was not readable' };
+    const won = rows.filter((row) => (side === 'home' ? row.h > 0 && row.a === 0 : row.a > 0 && row.h === 0))
+      .reduce((sum, row) => sum + row.p, 0);
+    const probability = /^no\b/.test(pick) ? 1 - won : won;
+    return { label: `Win to nil (${side})`, probability };
+  }
+
+  if (/gg\/ng|both teams to score|draw or gg/.test(market)) {
+    const btts = rows.filter((row) => row.h > 0 && row.a > 0).reduce((sum, row) => sum + row.p, 0);
+    if (/draw or gg/.test(market)) {
+      const either = rows.filter((row) => row.h === row.a || (row.h > 0 && row.a > 0)).reduce((sum, row) => sum + row.p, 0);
+      return { label: 'Draw or both teams to score', probability: /^no\b/.test(pick) ? 1 - either : either };
+    }
+    return { label: 'Both teams to score', probability: /^(no|ng)\b/.test(pick) ? 1 - btts : btts };
+  }
+
+  if (/asian handicap|handicap/.test(market)) {
+    const side = pick.includes('home') ? 'home' : pick.includes('away') ? 'away' : null;
+    const line = lineNumber(pick);
+    if (!side || line === null) return { reason: 'the handicap line or side was not readable' };
+    const drawn = pick.includes('+') ? line : -Math.abs(line);
+    let win = 0;
+    let push = 0;
+    for (const row of rows) {
+      const adjusted = (side === 'home' ? row.h : row.a) + drawn - (side === 'home' ? row.a : row.h);
+      if (adjusted > 0) win += row.p;
+      else if (adjusted === 0) push += row.p;
+    }
+    return { label: `Asian handicap ${drawn > 0 ? '+' : ''}${drawn} (${side})`, probability: win + push / 2 };
+  }
+
+  if (/^(home|away) (team )?or over/.test(market)) {
+    const side = market.startsWith('home') ? 'home' : 'away';
+    const line = lineNumber(market);
+    if (line === null) return { reason: 'the goals line in that combined market was not readable' };
+    const over = overProbability(rows, line, null);
+    const wins = rows.filter((row) => (side === 'home' ? row.h > row.a : row.a > row.h));
+    const win = wins.reduce((sum, row) => sum + row.p, 0);
+    const both = wins.filter((row) => row.h + row.a > line).reduce((sum, row) => sum + row.p, 0);
+    const probability = Math.min(1, win + over - both);
+    const team = side === 'home' ? event?.home?.name : event?.away?.name;
+    return { label: `${team || side} win or over ${line}`, probability };
+  }
+
+  if (/over\/under|total goals/.test(market)) {
+    const line = lineNumber(pick);
+    if (line === null) return { reason: 'the goals line was not readable' };
+    const teamSide = teamFromText(market, event);
+    const over = overProbability(rows, line, teamSide);
+    const wantsOver = /over/.test(pick) && !/under/.test(pick);
+    const wantsUnder = /under/.test(pick) && !/over/.test(pick);
+    if (!wantsOver && !wantsUnder) return { reason: 'the over/under side was not readable' };
+    const probability = wantsOver ? over : 1 - over;
+    const teamName = teamSide === 'home' ? event?.home?.name : teamSide === 'away' ? event?.away?.name : null;
+    return { label: `${teamName ? `${teamName} ` : ''}${wantsOver ? 'Over' : 'Under'} ${line}`, probability };
+  }
+
+  return { reason: 'this market type is not one the goals model can price' };
+}
+
 async function enrichLeg(events, leg) {
   const implied = leg.odds ? 1 / leg.odds : null;
   const base = { ...leg, implied, flags: [], alternative: null, analysed: false };
@@ -1033,14 +1208,20 @@ async function enrichLeg(events, leg) {
   }
 
   const context = await fetchMatchContext(event).catch(() => null);
-  const side = pickSide(leg, event);
+  const marketText = String(leg.market || '').toLowerCase();
+  const readsAs1X2 = !/double chance|draw no bet|over\/under|total goals|handicap|to score|win to nil|gg\/ng|both teams|draw or|1up|half|excluded|in a row|correct score/.test(marketText);
+  const side = readsAs1X2 ? pickSide(leg, event) : null;
   const flags = [];
 
+  let model = null;
   if (!side) {
-    flags.push({
-      level: 'caution',
-      text: `"${leg.selection || 'This pick'}" is not a 1X2 selection, so there is no de-vigged probability to test it against — only the book's own price.`,
-    });
+    model = marketModel(leg, event, context, event.market?.consensus || null);
+    if (model.reason) {
+      flags.push({
+        level: 'caution',
+        text: `No model for "${leg.market || 'this market'}": ${model.reason}. Only the book's price is known.`,
+      });
+    }
   }
 
   if (side && side !== 'draw') {
@@ -1091,17 +1272,29 @@ async function enrichLeg(events, leg) {
 
   if (!event.market) flags.push({ level: 'caution', text: 'No price in the feed for this fixture, so the base cannot be checked.' });
 
+  let read = flags.length ? flags[0].text : 'Nothing in the feed contradicts this pick.';
+  if (model && Number.isFinite(model.probability) && leg.odds) {
+    const implied = 1 / leg.odds;
+    const edge = model.probability * leg.odds - 1;
+    const sentence = edge < 0
+      ? `Model gives ${(model.probability * 100).toFixed(0)}% for ${model.label} from ${expectedGoals(context)?.matches || 5} scored matches a side; ${leg.odds.toFixed(2)} needs ${(implied * 100).toFixed(0)}%, so the price is short by ${Math.abs(edge * 100).toFixed(0)} points.`
+      : `Model gives ${(model.probability * 100).toFixed(0)}% for ${model.label} from ${expectedGoals(context)?.matches || 5} scored matches a side; ${leg.odds.toFixed(2)} needs ${(implied * 100).toFixed(0)}%. One book cannot confirm that as value on its own.`;
+    if (edge < -0.12) flags.push({ level: 'caution', text: sentence });
+    else read = sentence;
+  }
+
   return {
     ...base,
     analysed: true,
     side,
+    model: model && Number.isFinite(model.probability) ? { label: model.label, probability: Number(model.probability.toFixed(4)), edge: leg.odds ? Number((model.probability * leg.odds - 1).toFixed(3)) : null } : null,
     matchedEvent: event.name,
     form: context?.form || null,
     meetings: meetings.slice(0, 3),
     corners: context?.corners || null,
     flags,
     alternative,
-    read: flags.length ? flags[0].text : 'Nothing in the feed contradicts this pick.',
+    read: flags.length ? flags[0].text : read,
   };
 }
 
@@ -1119,6 +1312,7 @@ function legPayload(leg) {
     } : null,
     headToHead: leg.meetings || null,
     corners: leg.corners ? { home: leg.corners.home.average, away: leg.corners.away.average } : null,
+    model: leg.model ? `${leg.model.label}: ${(leg.model.probability * 100).toFixed(0)}% by the goals model` : null,
     flags: leg.flags.map((flag) => flag.text),
     alternative: leg.alternative,
   };
