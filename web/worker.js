@@ -846,6 +846,20 @@ function askContext(event, context) {
   };
 }
 
+async function leagueForEvent(env, eventId) {
+  if (!eventId) return null;
+  const wanted = String(eventId);
+  const keys = await Promise.all(FOOTBALL_LEAGUES.map(async (key) => {
+    try {
+      const { events } = await loadEvents(env, key);
+      return events.some((event) => event.id === wanted) ? key : null;
+    } catch {
+      return null;
+    }
+  }));
+  return keys.find(Boolean) || null;
+}
+
 async function handleAsk(request, env) {
   if (!sameOrigin(request)) return json({ error: 'Cross-origin request rejected' }, 403);
   let body;
@@ -857,8 +871,13 @@ async function handleAsk(request, env) {
 
   const question = String(body.question || '').slice(0, 400).trim();
   if (!question) return json({ error: 'Ask a question first' }, 400);
-  const key = body.sport || 'epl';
-  if (!LEAGUES[key]) return json({ error: `Unknown sport "${key}"` }, 400);
+  let key = body.sport || 'epl';
+  if (!LEAGUES[key]) {
+    if (key !== 'all') return json({ error: `Unknown sport "${key}"` }, 400);
+    const found = await leagueForEvent(env, body.eventId);
+    if (!found) return json({ error: 'Pick a fixture before asking about it' }, 400);
+    key = found;
+  }
 
   let event = null;
   let context = null;
@@ -1475,10 +1494,18 @@ async function handleResearch(request, env) {
     return json({ error: String(error.message || 'Invalid body') }, 400);
   }
 
-  const key = body.sport || 'epl';
-  if (!LEAGUES[key]) return json({ error: `Unknown sport "${key}"` }, 400);
   const query = String(body.query || '').slice(0, 120);
   const eventId = body.eventId ? String(body.eventId) : null;
+  let key = body.sport || 'epl';
+
+  if (!LEAGUES[key]) {
+    if (key !== 'all') return json({ error: `Unknown sport "${key}"` }, 400);
+    const found = eventId ? await leagueForEvent(env, eventId) : null;
+    if (!found) {
+      return json({ error: 'Research needs a league or a fixture from the feed' }, 400);
+    }
+    key = found;
+  }
 
   let events;
   try {
