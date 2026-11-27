@@ -73,7 +73,14 @@ function memoGet(key) {
   return hit.value;
 }
 function memoSet(key, value, ttlMs) {
-  if (memo.size > 200) memo.clear();
+  if (memo.size > 600) {
+    let drop = memo.size - 500;
+    for (const existing of memo.keys()) {
+      if (drop <= 0) break;
+      memo.delete(existing);
+      drop -= 1;
+    }
+  }
   memo.set(key, { value, expires: Date.now() + ttlMs });
 }
 
@@ -411,6 +418,32 @@ async function loadEvents(env, key) {
   return { events, source };
 }
 
+async function loadEventsCached(env, key) {
+  const cacheKey = `events:${key}`;
+  const hit = memoGet(cacheKey);
+  if (hit) return hit;
+  const data = await loadEvents(env, key);
+  memoSet(cacheKey, data, 90_000);
+  return data;
+}
+
+/** Runs async work over a list with a fixed number of runners, keeping the
+ * output in input order so results do not depend on completion timing. */
+async function mapLimit(items, limit, worker) {
+  const results = new Array(items.length);
+  let next = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index], index);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
 /* ------------------------------------------------------------------ search */
 
 const STOP = new Set(['vs', 'v', 'the', 'fc', 'at', 'and', 'de', 'cf']);
@@ -509,6 +542,22 @@ async function espnTeamList(key) {
   const teams = data?.sports?.[0]?.leagues?.[0]?.teams?.map((row) => row.team).filter(Boolean) || [];
   if (teams.length) memoSet(cacheKey, teams, 30 * 60 * 1000);
   return teams;
+}
+
+/* ESPN throttles bursts: one shared slot pool keeps corner summaries from
+ * flooding the host when many legs are enriched at once. */
+let cornerActive = 0;
+const cornerQueue = [];
+async function withCornerSlot(task) {
+  if (cornerActive >= 6) await new Promise((resolve) => cornerQueue.push(resolve));
+  cornerActive += 1;
+  try {
+    return await task();
+  } finally {
+    cornerActive -= 1;
+    const next = cornerQueue.shift();
+    if (next) next();
+  }
 }
 
 async function cornersForEvent(key, eventId) {
@@ -637,10 +686,10 @@ async function fetchMatchContext(event) {
   ].filter(Boolean))].slice(0, 14);
 
   const cornerRows = new Map();
-  await Promise.all(ids.map(async (id) => {
-    const row = await cornersForEvent(event.league, id).catch(() => null);
+  await mapLimit(ids, 6, async (id) => {
+    const row = await withCornerSlot(() => cornersForEvent(event.league, id)).catch(() => null);
     if (row && (row.home !== null || row.away !== null)) cornerRows.set(id, row);
-  }));
+  });
 
   const average = (values) => (values.length
     ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1))
@@ -868,7 +917,7 @@ async function leagueForEvent(env, eventId) {
   const wanted = String(eventId);
   const keys = await Promise.all(FOOTBALL_LEAGUES.map(async (key) => {
     try {
-      const { events } = await loadEvents(env, key);
+      const { events } = await loadEventsCached(env, key);
       return events.some((event) => event.id === wanted) ? key : null;
     } catch {
       return null;
@@ -1350,18 +1399,30 @@ async function handleSlip(request, env) {
   }
 
   const legs = resolved.legs.slice(0, 40);
+  const startedAt = Date.now();
   const pool = (await Promise.all(
-    FOOTBALL_LEAGUES.map((key) => loadEvents(env, key).catch(() => ({ events: [] }))),
+    FOOTBALL_LEAGUES.map((key) => loadEventsCached(env, key).catch(() => ({ events: [] }))),
   )).flatMap((row) => row.events || []);
 
-  const analysed = [];
-  for (const leg of legs.slice(0, 30)) {
-    analysed.push(await enrichLeg(pool, leg));
-  }
+  const feedMs = Date.now() - startedAt;
+  const analysed = await mapLimit(legs.slice(0, 30), 6, async (leg) => {
+    try {
+      return await enrichLeg(pool, leg);
+    } catch (error) {
+      return {
+        ...leg,
+        flags: [],
+        analysed: false,
+        skipped: String(error?.message || error || 'enrichment failed').slice(0, 120),
+      };
+    }
+  });
+  const enrichMs = Date.now() - startedAt - feedMs;
   const rest = legs.slice(30).map((leg) => ({
     ...leg,
     flags: [],
     analysed: false,
+    skipped: 'outside the 30-leg research budget',
     read: 'Not analysed in depth — the slip has more legs than one pass can research.',
   }));
   const all = [...analysed, ...rest];
@@ -1372,6 +1433,7 @@ async function handleSlip(request, env) {
     .slice(0, 3)
     .map((leg) => ({ event: leg.matchedEvent, name: leg.alternative.name, price: leg.alternative.price, fair: leg.alternative.fair }));
 
+  const beforeAi = Date.now();
   let ai = null;
   let aiError = null;
   if (env.OPENAI_API_KEY) {
@@ -1406,7 +1468,9 @@ async function handleSlip(request, env) {
     stake: resolved.stake,
     potential: resolved.potential,
     legs: all,
-    analysedCount: analysed.length,
+    timing: { feed: feedMs, enrich: enrichMs, ai: Date.now() - beforeAi, total: Date.now() - startedAt },
+    analysedCount: analysed.filter((leg) => leg.analysed).length,
+    skipped: all.filter((leg) => leg.skipped).map((leg) => ({ event: leg.event || null, reason: leg.skipped })),
     avoid,
     caution,
     best: candidates[0] || null,
@@ -1568,7 +1632,7 @@ async function handleBuild(request, env) {
 
   const packs = await Promise.all(FOOTBALL_LEAGUES.map(async (key) => {
     try {
-      const { events } = await loadEvents(env, key);
+      const { events } = await loadEventsCached(env, key);
       return events
         .filter((event) => !event.completed && event.market && event.start)
         .map((event) => ({ ...event, leagueLabel: LEAGUES[key].label, league: key }));
