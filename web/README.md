@@ -21,6 +21,8 @@ bookmaker price exists. The report says which research inputs are missing
 | Match form | ESPN team feeds: last five results and W/D/L sequence per side |
 | Head-to-head | This season plus last season's completed meetings |
 | Ask desk | Plain-English Q&A grounded in the same worker-computed numbers |
+| Post checker | Paste an X post; the worker pulls its text and marks each factual claim supported, contradicted or cannot verify against form and head-to-head |
+| Booking code reader | SportyBet codes resolve to their legs and combined price via the book's own share endpoint; other books are named as unsupported rather than guessed |
 | Arbitrage flag | `Σ(1/best price) < 1` |
 | Slip audit | Combined odds + per-leg edge against the live feed, with a trim suggestion |
 | Book converter | Same slip at equivalent decimal odds for Bet9ja/BetKing/GokaBet/1xBet (no booking code) |
@@ -32,6 +34,18 @@ Leagues: Premier League, La Liga, Serie A, Bundesliga, Ligue 1, Champions
 League, Europa League, plus NBA, NFL, MLB and NHL as secondary sports.
 Platforms listed in the UI: SportyBet (priced), Bet9ja, BetKing, GokaBet, 1xBet
 (conversion targets only).
+
+## Codes and claims
+
+Paste a link like `https://x.com/<user>/status/<id>` into **Codes & claims**. The
+worker reads the post through X's syndication endpoint (with public mirrors as
+fallbacks), matches it to a fixture in the feed, and asks the model to grade each
+factual claim against form and head-to-head only. Anything the feed cannot cover
+comes back as `cannot verify`, never as a guess.
+
+Paste a booking code and the worker asks SportyBet's share endpoint for the legs.
+A code from Bet9ja, BetKing or GokaBet has no open reader, so the UI says so and
+points at the slip audit instead of inventing a slip.
 
 ## Run locally
 
