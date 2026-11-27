@@ -33,8 +33,8 @@
       <p class="eyebrow">Football first · Nigerian books</p>
       <h1>Research the match,<br><em>not the tip.</em></h1>
       <p class="lede">
-        SportyBet prices, de-vigged into fair probability, then set against current form,
-        head-to-head and corners per game. One fixture at a time, with the gaps named out loud.
+        Prices from SportyBet across Europe, the Championship, Norway, Saudi Arabia and MLS,
+        set against current form, head-to-head and corners per game — with the gaps named out loud.
       </p>
       <div class="platforms" id="platforms"></div>
       <div class="hero-stats" id="hero-stats">
@@ -61,6 +61,11 @@
       <h2>The feed</h2>
       <p class="hint">Tap a price to add it to a slip. “Research” reads the whole match.</p>
       <div class="chips" id="league-chips"></div>
+      <div class="day-tabs" id="day-tabs">
+        <button class="day-tab active" data-day="today">Today</button>
+        <button class="day-tab" data-day="tomorrow">Tomorrow</button>
+        <input type="date" id="day-date" class="day-date" aria-label="Pick a date" />
+      </div>
     </div>
     <p class="feed-meta" id="feed-meta">loading fixtures…</p>
     <div class="board" id="board">
@@ -93,8 +98,14 @@
       </form>
       <div class="row" id="slip-suggest" style="margin-top:10px">
         <button class="chip" data-slip="MAG1NM">Try MAG1NM</button>
-        <span class="hint" style="align-self:center">SportyBet, Bet9ja, BetKing and GokaBet codes accepted.</span>
+        <button class="chip" data-slip="YKHY6X">Try YKHY6X</button>
+        <span class="hint" style="align-self:center">SportyBet codes open directly; other books are named, not guessed.</span>
       </div>
+      <div class="trim-row">
+        <input class="input" id="trim-target" type="number" min="1.2" step="1" placeholder="Trim to odds · e.g. 100" />
+        <button class="btn btn-ghost" id="trim-run" type="button">Trim slip</button>
+      </div>
+      <div id="trim-out" class="panel empty-state">Set a target price and trim: the safest legs are kept until the target is met, and the legs not worth playing are listed.</div>
       <div id="slip-out" class="panel empty-state" style="margin-top:14px">
         The book is detected from the code, the legs are read from its own slip endpoint, and each pick is
         checked against live price, form, head-to-head and corners. Anything working against a pick is named.

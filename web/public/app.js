@@ -4,13 +4,44 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 const state = {
-  sport: 'epl',
+  sport: 'all',
+  league: 'all',
+  day: null,
   football: [],
   other: [],
   platforms: [],
   events: [],
+  updated: null,
   askEvent: null,
 };
+
+const FAV_KEY = 'sport-analyst.favourites.v1';
+
+function loadFavourites() {
+  try {
+    const rows = JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function toggleFavourite(key) {
+  const rows = loadFavourites();
+  const next = rows.includes(key) ? rows.filter((row) => row !== key) : [...rows, key];
+  localStorage.setItem(FAV_KEY, JSON.stringify(next));
+  renderChips();
+}
+
+function dateKey(date) {
+  const value = date || new Date();
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+}
+
+function eventDay(event) {
+  const at = new Date(event.start);
+  return Number.isNaN(at.getTime()) ? null : dateKey(at);
+}
 
 const RECORD_KEY = 'sport-analyst.record.v1';
 const STOP = new Set(['to', 'win', 'wins', 'the', 'fc', 'vs', 'v', 'at', 'and', 'or', 'over', 'under', 'match', 'bet', 'both', 'teams', 'score', 'goals', 'draw', 'home', 'away']);
@@ -119,11 +150,18 @@ function renderBookOptions() {
 }
 
 function renderChips() {
-  const chips = [
-    ...state.football.map((l) => `<button class="chip${l.key === state.sport ? ' active' : ''}" data-sport="${l.key}">${escapeHtml(l.label)}</button>`),
-    ...state.other.map((l) => `<button class="chip more${l.key === state.sport ? ' active' : ''}" data-sport="${l.key}">${escapeHtml(l.label)}</button>`),
-  ];
-  $('#league-chips').innerHTML = chips.join('') || '<span class="hint">Leagues unavailable</span>';
+  const favourites = loadFavourites();
+  const leagues = [...state.football].sort((a, b) => {
+    const favA = favourites.includes(a.key) ? 1 : 0;
+    const favB = favourites.includes(b.key) ? 1 : 0;
+    return favB - favA;
+  });
+  const all = `<button class="chip${state.league === 'all' ? ' active' : ''}" data-league="all">All leagues</button>`;
+  const chips = leagues.map((league) => {
+    const starred = favourites.includes(league.key);
+    return `<span class="chip-wrap"><button class="chip${state.league === league.key ? ' active' : ''}${starred ? ' star' : ''}" data-league="${league.key}">${escapeHtml(league.label)}</button><button class="chip-star${starred ? ' on' : ''}" data-fav="${league.key}" aria-label="Favourite ${escapeHtml(league.label)}">★</button></span>`;
+  });
+  $('#league-chips').innerHTML = [all, ...chips].join('');
 }
 
 /* -------------------------------------------------------- scroll effects */
@@ -151,7 +189,6 @@ function trackProgress() {
 
 async function loadFeed(sport) {
   state.sport = sport;
-  renderChips();
   const board = $('#board');
   board.innerHTML = '<div class="skeleton" style="height:200px"></div><div class="skeleton" style="height:200px"></div>';
   $('#feed-meta').textContent = 'loading fixtures…';
@@ -159,17 +196,39 @@ async function loadFeed(sport) {
   try {
     const data = await api(`/api/odds?sport=${encodeURIComponent(sport)}&limit=24`);
     state.events = data.events || [];
-    $('#feed-meta').textContent = `${data.events.length} fixtures · ${labelFor(sport)} · ${data.source} · updated ${new Date(data.updated).toLocaleTimeString()}`;
-    board.innerHTML = data.events.length
-      ? data.events.map(fixtureCard).join('')
-      : '<div class="panel empty-state">No upcoming fixtures published for this league right now.</div>';
+    state.updated = data.updated;
     updateHero(data);
     renderTicker();
     renderHeroBoard(state.events);
+    renderFeed();
   } catch (error) {
     $('#feed-meta').textContent = 'feed unavailable';
     board.innerHTML = `<div class="panel empty-state">Could not load prices: ${escapeHtml(error.message)}</div>`;
   }
+}
+
+function renderFeed() {
+  const wanted = state.day || dateKey(new Date());
+  const favourites = loadFavourites();
+  let list = (state.events || []).filter((event) => eventDay(event) === wanted);
+  if (state.league !== 'all') list = list.filter((event) => event.league === state.league);
+  list.sort((a, b) => {
+    const favA = favourites.includes(a.league) ? 1 : 0;
+    const favB = favourites.includes(b.league) ? 1 : 0;
+    return favB - favA || new Date(a.start || 0) - new Date(b.start || 0);
+  });
+
+  const label = wanted === dateKey(new Date())
+    ? 'today'
+    : wanted === dateKey(new Date(Date.now() + 86400000))
+      ? 'tomorrow'
+      : wanted;
+  const leagueLabel = state.league === 'all' ? 'all leagues' : labelFor(state.league);
+  $('#feed-meta').textContent = `${list.length} fixtures · ${label} · ${leagueLabel}${state.updated ? ` · updated ${new Date(state.updated).toLocaleTimeString()}` : ''}`;
+  $('#board').innerHTML = list.length
+    ? list.map(fixtureCard).join('')
+    : '<div class="panel empty-state">No fixtures on this day for this filter. Pick another day or All leagues.</div>';
+  renderChips();
 }
 
 function labelFor(key) {
@@ -840,8 +899,56 @@ function settle(id, status) {
 
 function bind() {
   $('#league-chips').addEventListener('click', (event) => {
-    const chip = event.target.closest('[data-sport]');
-    if (chip) loadFeed(chip.dataset.sport);
+    const star = event.target.closest('[data-fav]');
+    if (star) return toggleFavourite(star.dataset.fav);
+    const chip = event.target.closest('[data-league]');
+    if (!chip) return;
+    state.league = chip.dataset.league;
+    renderFeed();
+  });
+
+  $('#day-tabs').addEventListener('click', (event) => {
+    const tab = event.target.closest('[data-day]');
+    if (!tab) return;
+    state.day = tab.dataset.day === 'today'
+      ? dateKey(new Date())
+      : tab.dataset.day === 'tomorrow'
+        ? dateKey(new Date(Date.now() + 86400000))
+        : dateKey(new Date());
+    $$('#day-tabs .day-tab').forEach((row) => row.classList.toggle('active', row === tab));
+    renderFeed();
+  });
+
+  $('#day-date').addEventListener('change', (event) => {
+    if (!event.target.value) return;
+    state.day = event.target.value;
+    $$('#day-tabs .day-tab').forEach((row) => row.classList.remove('active'));
+    renderFeed();
+  });
+
+  $('#trim-run').addEventListener('click', async () => {
+    const code = ($('#slip-input').value.trim() || 'MAG1NM').toUpperCase();
+    const target = Number($('#trim-target').value);
+    if (!(target > 1)) return toast('Give a target price above 1.00');
+    const out = $('#trim-out');
+    out.className = 'panel';
+    out.innerHTML = '<div class="skeleton" style="height:120px"></div>';
+    try {
+      const data = await api('/api/trim', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code, target }),
+      });
+      out.innerHTML = `
+        <div class="report-head"><span class="tag src">${escapeHtml(code)}</span><span class="tag">target ${target}</span><span class="tag good">${data.kept.length} legs</span></div>
+        <div class="verdict"><b>${price(data.combined)}</b><span>trimmed combined · ${data.dropped} legs cut</span></div>
+        <div class="legs">${data.kept.map((leg) => `<div class="leg"><span>${escapeHtml(leg.event || '')}<br /><span class="hint">${escapeHtml(leg.market || '')} · ${escapeHtml(leg.selection || '')}</span></span><span class="leg-price">${price(leg.odds)}</span><span class="tag">${leg.implied}%</span></div>`).join('')}</div>
+        ${data.avoid.length ? `<div class="warn-line"><b>Not worth playing.</b><span>${data.avoid.map((leg) => `${escapeHtml(leg.event || '')} (${leg.implied}%)`).join(' · ')}</span></div>` : ''}
+        <p class="hint" style="margin-top:10px">${escapeHtml(data.note)}</p>`;
+    } catch (error) {
+      out.className = 'panel empty-state';
+      out.textContent = `Trim failed: ${error.message}`;
+    }
   });
 
   $('#board').addEventListener('click', (event) => {
@@ -930,4 +1037,5 @@ function bind() {
   trackProgress();
 }
 
+state.day = dateKey(new Date());
 boot();

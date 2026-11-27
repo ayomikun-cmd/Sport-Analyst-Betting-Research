@@ -33,6 +33,14 @@ const LEAGUES = {
   ligue1:     { label: 'Ligue 1',               sport: 'soccer',     espn: 'fra.1',          odds: 'soccer_france_ligue_one',     sporty: 34 },
   ucl:        { label: 'Champions League',      sport: 'soccer',     espn: 'uefa.champions', odds: 'soccer_uefa_champs_league',   sporty: 7 },
   uel:        { label: 'Europa League',         sport: 'soccer',     espn: 'uefa.europa',    odds: 'soccer_uefa_europa_league',   sporty: 679 },
+  norway:     { label: 'Eliteserien',           sport: 'soccer',     espn: 'nor.1',          odds: null,                          sporty: 20 },
+  eredivisie: { label: 'Eredivisie',            sport: 'soccer',     espn: 'ned.1',          odds: null,                          sporty: 37 },
+  belgium:    { label: 'Belgian Pro League',    sport: 'soccer',     espn: 'bel.1',          odds: null,                          sporty: 38 },
+  mls:        { label: 'MLS',                   sport: 'soccer',     espn: 'usa.1',          odds: null,                          sporty: 242 },
+  saudi:      { label: 'Saudi Pro League',      sport: 'soccer',     espn: 'ksa.1',          odds: null,                          sporty: 955 },
+  championship: { label: 'Championship',        sport: 'soccer',     espn: 'eng.2',          odds: null,                          sporty: null },
+  greece:     { label: 'Greek Super League',    sport: 'soccer',     espn: 'gre.1',          odds: null,                          sporty: null },
+  ukraine:    { label: 'Ukrainian Premier League', sport: 'soccer',   espn: 'ukr.1',          odds: null,                          sporty: null },
   nba:        { label: 'NBA',                   sport: 'basketball', espn: 'nba',            odds: 'basketball_nba',              sporty: null },
   nfl:        { label: 'NFL',                   sport: 'football',   espn: 'nfl',            odds: 'americanfootball_nfl',        sporty: null },
   mlb:        { label: 'MLB',                   sport: 'baseball',   espn: 'mlb',            odds: 'baseball_mlb',                sporty: null },
@@ -1203,13 +1211,103 @@ async function readBody(request) {
 
 /* ----------------------------------------------------------------- routes */
 
+async function logoIndex(key) {
+  const cacheKey = `logos:${key}`;
+  const cached = memoGet(cacheKey);
+  if (cached) return cached;
+  let teams = [];
+  try {
+    teams = (await espnTeamList(key)) || [];
+  } catch { /* no logos */ }
+  const index = teams
+    .map((team) => ({
+      keys: nameKeys(team.displayName),
+      logo: team.logo || team.logos?.[0]?.href || null,
+    }))
+    .filter((row) => row.logo && row.keys.length);
+  memoSet(cacheKey, index, 6 * 3600 * 1000);
+  return index;
+}
+
+function logoFor(team, index) {
+  if (!team || team.logo || !index.length) return team;
+  const keys = nameKeys(team.name);
+  let best = null;
+  let bestScore = 0;
+  for (const row of index) {
+    let score = 0;
+    for (const key of keys) if (row.keys.includes(key)) score += 2;
+    if (score > bestScore) {
+      bestScore = score;
+      best = row.logo;
+    }
+  }
+  if (bestScore >= 2) team.logo = best;
+  return team;
+}
+
+async function attachLogos(events, leagueKey) {
+  const index = await logoIndex(leagueKey).catch(() => []);
+  for (const event of events) {
+    logoFor(event.home, index);
+    logoFor(event.away, index);
+  }
+  return events;
+}
+
 async function handleOdds(url, env) {
   const key = url.searchParams.get('sport') || 'epl';
-  if (!LEAGUES[key]) return json({ error: `Unknown sport "${key}"` }, 400);
+  if (key !== 'all' && !LEAGUES[key]) return json({ error: `Unknown sport "${key}"` }, 400);
+
+  if (key === 'all') {
+    const cached = memoGet('feed:all');
+    if (cached) return json(cached);
+    try {
+      const packs = await Promise.all(FOOTBALL_LEAGUES.map(async (leagueKey) => {
+        try {
+          const { events } = await loadEvents(env, leagueKey);
+          return events
+            .filter((event) => !event.completed)
+            .map((event) => ({ ...event, leagueLabel: LEAGUES[leagueKey].label, league: leagueKey }));
+        } catch {
+          return [];
+        }
+      }));
+      const seen = new Set();
+      const merged = packs.flat().filter((event) => {
+        const id = event.id || event.name;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+      await Promise.all([...new Set(merged.map((event) => event.league))].map(async (leagueKey) => {
+        await attachLogos(merged.filter((event) => event.league === leagueKey), leagueKey);
+      }));
+      merged.sort((a, b) => new Date(a.start || 0) - new Date(b.start || 0));
+      const payload = {
+        sport: 'all',
+        source: 'mixed',
+        multiBook: false,
+        pricedEvents: merged.filter((event) => event.books.length && event.market).length,
+        updated: new Date().toISOString(),
+        events: merged.slice(0, 240),
+      };
+      memoSet('feed:all', payload, 3 * 60 * 1000);
+      return json(payload);
+    } catch (error) {
+      return json({ error: 'Could not load the multi-league feed', detail: String(error.message || error) }, 502);
+    }
+  }
+
   try {
     const { events, source } = await loadEvents(env, key);
     const limit = Math.min(Number(url.searchParams.get('limit')) || 12, 24);
     const priced = events.filter((event) => event.books.length && event.market).length;
+    const sorted = events
+      .filter((event) => !event.completed)
+      .sort((a, b) => new Date(a.start || 0) - new Date(b.start || 0))
+      .slice(0, limit);
+    await attachLogos(sorted, key);
     return json({
       sport: key,
       league: LEAGUES[key],
@@ -1217,14 +1315,74 @@ async function handleOdds(url, env) {
       multiBook: source === 'oddsapi',
       pricedEvents: priced,
       updated: new Date().toISOString(),
-      events: events
-        .filter((event) => !event.completed)
-        .sort((a, b) => new Date(a.start || 0) - new Date(b.start || 0))
-        .slice(0, limit),
+      events: sorted,
     });
   } catch (error) {
     return json({ error: 'Could not load odds feed', detail: String(error.message || error) }, 502);
   }
+}
+
+async function handleTrim(request, env) {
+  if (!sameOrigin(request)) return json({ error: 'Cross-origin request rejected' }, 403);
+  let body;
+  try {
+    body = await readBody(request);
+  } catch (error) {
+    return json({ error: String(error.message || 'Invalid body') }, 400);
+  }
+
+  const code = String(body.code || '').replace(/\s+/g, '').toUpperCase().slice(0, 24);
+  const target = Number(body.target);
+  if (!code) return json({ error: 'Paste the code first' }, 400);
+  if (!(target >= 1.2 && target <= 100000)) return json({ error: 'Give a target combined price between 1.20 and 100,000' }, 400);
+
+  let resolved;
+  try {
+    resolved = await resolveSportyCode(code);
+  } catch (error) {
+    return json({ error: String(error.message || 'Code lookup failed').slice(0, 160) }, 502);
+  }
+  if (!resolved.ok) {
+    return json({ error: `SportyBet could not open ${code}: ${String(resolved.message || 'no selections').replace(/\.$/, '')}` }, 400);
+  }
+
+  const legs = resolved.legs
+    .filter((leg) => leg.odds && leg.odds > 1)
+    .map((leg) => ({ ...leg, implied: 1 / leg.odds }))
+    .sort((a, b) => b.implied - a.implied);
+
+  const kept = [];
+  let combined = 1;
+  for (const leg of legs) {
+    if (combined >= target) break;
+    kept.push(leg);
+    combined *= leg.odds;
+  }
+
+  const keptIds = new Set(kept.map((leg) => `${leg.eventId}|${leg.market}|${leg.selection}`));
+  const dropped = legs.filter((leg) => !keptIds.has(`${leg.eventId}|${leg.market}|${leg.selection}`));
+  const weakest = dropped.slice(0, 12).map((leg) => ({
+    event: leg.event,
+    selection: leg.selection,
+    odds: leg.odds,
+    implied: Number((leg.implied * 100).toFixed(0)),
+  }));
+
+  return json({
+    code,
+    target,
+    combined: Number(combined.toFixed(2)),
+    kept: kept.map((leg) => ({
+      event: leg.event,
+      market: leg.market,
+      selection: leg.selection,
+      odds: leg.odds,
+      implied: Number((leg.implied * 100).toFixed(0)),
+    })),
+    dropped: dropped.length,
+    avoid: weakest,
+    note: 'Legs are kept safest-first by implied probability until the target is met. The app cannot mint a new booking code: rebuild these picks in the bookmaker, and check any pick swapped for a safer market yourself.',
+  });
 }
 
 async function handleResearch(request, env) {
@@ -1419,6 +1577,7 @@ async function route(request, env) {
   if (pathname === '/api/convert' && request.method === 'POST') return handleConvert(request);
   if (pathname === '/api/ask' && request.method === 'POST') return handleAsk(request, env);
   if (pathname === '/api/slip' && request.method === 'POST') return handleSlip(request, env);
+  if (pathname === '/api/trim' && request.method === 'POST') return handleTrim(request, env);
 
   if (pathname.startsWith('/api/')) return json({ error: 'Not found' }, 404);
 
